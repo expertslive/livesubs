@@ -84,6 +84,24 @@ function createSubtitleStore() {
 		reset() {
 			lineCounter = 0;
 			set(defaultState);
+		},
+
+		/** Bulk-set state from broadcast data (avoids re-adding lines one-by-one) */
+		setBroadcastState(data: {
+			lines: SubtitleLine[];
+			partialText: string;
+			connectionStatus: ConnectionStatus;
+			errorMessage: string;
+			lastActivityTimestamp: number;
+		}) {
+			update((state) => ({
+				...state,
+				lines: data.lines,
+				partialText: data.partialText,
+				connectionStatus: data.connectionStatus,
+				errorMessage: data.errorMessage,
+				lastActivityTimestamp: data.lastActivityTimestamp
+			}));
 		}
 	};
 }

@@ -6,6 +6,7 @@
 	import { resumeActiveMonitor } from '$lib/services/audio';
 	import { startSession, stopSession } from '$lib/services/session';
 	import { applyUrlParams } from '$lib/utils/url-params';
+	import { startBroadcasting, stopBroadcasting } from '$lib/services/broadcast';
 	import ConfigPanel from '$lib/components/ConfigPanel.svelte';
 	import SubtitleDisplay from '$lib/components/SubtitleDisplay.svelte';
 
@@ -78,9 +79,13 @@
 			$settings.phrases = [...defaultPhrases];
 		}
 
+		// Broadcast subtitle + style state to overlay tabs
+		startBroadcasting();
+
 		document.addEventListener('fullscreenchange', handleFullscreenChange);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
+			stopBroadcasting();
 			document.removeEventListener('fullscreenchange', handleFullscreenChange);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 		};

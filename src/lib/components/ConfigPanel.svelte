@@ -5,12 +5,14 @@
 	import { startSession, stopSession, getSessionTranscriptCount } from '$lib/services/session';
 	import { getEntryCount, exportAsText, exportAsSrt, downloadFile } from '$lib/services/transcript';
 	import { startDemo, stopDemo, isDemoRunning } from '$lib/services/demo';
-	import { buildShareUrl } from '$lib/utils/url-params';
+	import { buildShareUrl, buildOverlayUrl } from '$lib/utils/url-params';
 	import AudioDeviceSelector from './AudioDeviceSelector.svelte';
 	import StyleControls from './StyleControls.svelte';
 	import PhraseListEditor from './PhraseListEditor.svelte';
 	import PresetManager from './PresetManager.svelte';
 	import SubtitleDisplay from './SubtitleDisplay.svelte';
+	import SubtitleHistory from './SubtitleHistory.svelte';
+	import QrCode from './QrCode.svelte';
 
 	interface Props {
 		onFullscreen: () => void;
@@ -93,6 +95,23 @@
 		urlCopied = true;
 		setTimeout(() => { urlCopied = false; }, 2000);
 	}
+
+	let overlayUrlCopied = $state(false);
+	let showHistory = $state(false);
+
+	function handleOpenOverlay() {
+		window.open('/overlay', '_blank', 'noopener');
+	}
+
+	async function handleCopyOverlayUrl(event: MouseEvent) {
+		const includeKey = event.shiftKey;
+		const url = buildOverlayUrl(includeKey);
+		await navigator.clipboard.writeText(url);
+		overlayUrlCopied = true;
+		setTimeout(() => { overlayUrlCopied = false; }, 2000);
+	}
+
+	let overlayUrl = $derived(buildOverlayUrl(false));
 
 	function handleDemo() {
 		if (demoRunning) {
@@ -412,7 +431,7 @@
 
 			<!-- VU Meter -->
 			{#if running}
-				<div class="ml-auto flex items-center gap-2">
+				<div class="flex items-center gap-2">
 					<span class="text-xs" style:color="var(--el-muted)">Audio</span>
 					<div class="w-24 h-2 rounded-full overflow-hidden" style:background-color="var(--el-bg-light)">
 						<div
@@ -423,11 +442,57 @@
 					</div>
 				</div>
 			{/if}
+
+			<div class="ml-auto flex items-center gap-2">
+				<button
+					onclick={() => { showHistory = !showHistory; }}
+					class="text-xs px-2 py-1 rounded hover:brightness-110 transition-all"
+					style:background-color={showHistory ? 'var(--el-blue)' : 'var(--el-bg-light)'}
+					style:color={showHistory ? 'white' : 'var(--el-muted)'}
+					title="Toggle subtitle history"
+				>
+					History
+				</button>
+				<button
+					onclick={handleOpenOverlay}
+					class="text-xs px-2 py-1 rounded hover:brightness-110 transition-all"
+					style:background-color="var(--el-bg-light)"
+					style:color="var(--el-muted)"
+					title="Open overlay in new window"
+				>
+					Open Overlay
+				</button>
+				<button
+					onclick={handleCopyOverlayUrl}
+					class="text-xs px-2 py-1 rounded hover:brightness-110 transition-all"
+					style:background-color="var(--el-bg-light)"
+					style:color="var(--el-muted)"
+					title="Copy overlay URL for OBS (Shift+click to include Azure key)"
+				>
+					{overlayUrlCopied ? 'Copied!' : 'Copy Overlay URL'}
+				</button>
+			</div>
 		</div>
 
-		<!-- Preview -->
-		<div class="flex-1 relative" style:background-color="#00FF00">
-			<SubtitleDisplay preview={true} />
-		</div>
+		<!-- History / Preview area -->
+		{#if showHistory}
+			<div class="flex-1 flex flex-col min-h-0">
+				<div class="flex-1 min-h-0">
+					<SubtitleHistory sessionStartTime={$subtitles.sessionStartTime} />
+				</div>
+				<!-- QR Code -->
+				<div class="border-t border-white/10 p-3 flex items-center gap-3" style:background-color="var(--el-bg)">
+					<QrCode url={overlayUrl} size={80} />
+					<div>
+						<p class="text-xs font-semibold text-white">Overlay QR Code</p>
+						<p class="text-xs" style:color="var(--el-muted)">Scan to open overlay on another device</p>
+					</div>
+				</div>
+			</div>
+		{:else}
+			<div class="flex-1 relative" style:background-color="#00FF00">
+				<SubtitleDisplay preview={true} />
+			</div>
+		{/if}
 	</div>
 </div>

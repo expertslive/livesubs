@@ -1,8 +1,8 @@
 # LiveSubs
 
-Real-time subtitling app for **Experts Live** IT conferences. Captures audio from a microphone or virtual audio device, transcribes speech using Azure Cognitive Services, optionally translates between languages, and displays configurable subtitles on a chroma-key green screen.
+Real-time subtitling app for **Experts Live** IT conferences. Captures audio from a microphone or virtual audio device, transcribes speech using Azure Cognitive Services, optionally translates between languages, and displays configurable subtitles on a chroma-key green screen or transparent overlay.
 
-Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, session transcript export, and operator-friendly features like keyboard shortcuts, shareable config URLs, and settings presets.
+Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, session transcript export, OBS browser source integration, multi-output sync via BroadcastChannel, and operator-friendly features like keyboard shortcuts, shareable config URLs, QR codes, subtitle history, and settings presets.
 
 ![Experts Live](static/logo.png)
 
@@ -10,17 +10,43 @@ Built for multi-hour live events with automatic reconnection, device disconnect 
 
 ```mermaid
 graph LR
-    A[Microphone / HDMI Audio] -->|Web Audio API| B[Browser]
+    A[Microphone / HDMI Audio] -->|Web Audio API| B[Operator Tab /]
     B -->|WebSocket| C[Azure Speech SDK]
     C -->|Partial + Final text| B
-    B --> D[Green-Screen Subtitle Output]
     B --> E[Config Panel + Preview]
+    B -->|BroadcastChannel| OV1[/overlay tab\nReceiver mode]
+    B -->|BroadcastChannel| OV2[/overlay tab\nConfidence monitor]
+
+    OV3[/overlay?key=...&region=...\nOBS Browser Source] -->|Own WebSocket| C
 
     subgraph Azure Cognitive Services
         C --> F[Speech-to-Text]
         F -->|if translation needed| G[Translation]
     end
 ```
+
+### Multi-Output Architecture
+
+The operator tab broadcasts subtitle and style state to other tabs via the BroadcastChannel API. A dedicated `/overlay` route renders subtitles on a transparent or configurable background.
+
+```mermaid
+flowchart TB
+    subgraph Same Browser
+        OP[Operator Tab /] -->|BroadcastChannel 'livesubs'| OV1[/overlay tab]
+        OP -->|BroadcastChannel 'livesubs'| OV2[/overlay tab\non tablet]
+    end
+
+    subgraph OBS / Separate Process
+        OV3[/overlay?key=...&region=...\nStandalone mode] -->|Own Azure session| AZ[Azure Speech]
+    end
+
+    style OP fill:#1B2A6B,color:#fff
+    style OV1 fill:#2E7CC4,color:#fff
+    style OV2 fill:#2E7CC4,color:#fff
+    style OV3 fill:#F59E0B,color:#000
+```
+
+> **Key constraint:** BroadcastChannel only works between tabs in the **same browser process**. OBS browser sources run in an isolated CEF process and cannot receive these messages. For OBS, the `/overlay` route is self-sufficient — it reads config from URL params and starts its own Azure session.
 
 ### Recognizer Selection
 
@@ -63,6 +89,8 @@ flowchart LR
         TR[transcript.ts]
         WL[wakelock.ts]
         DM[demo.ts]
+        BC[broadcast.ts]
+        BR[broadcast-receiver.ts]
     end
 
     subgraph Utils
@@ -84,6 +112,12 @@ flowchart LR
     S2 --> SD[SubtitleDisplay]
     S3 --> SD
     DM -->|simulated text| S3
+
+    S3 -->|subscribe| BC
+    S2 -->|subscribe| BC
+    BC -->|BroadcastChannel| BR
+    BR -->|write| S3
+    BR -->|write| S2
 
     UP -->|apply URL params| S1
     UP -->|apply URL params| S2
@@ -177,6 +211,8 @@ src/
 │   │   ├── SubtitleDisplay.svelte    # Styled subtitle renderer with entry animations
 │   │   ├── ConfigPanel.svelte        # Main config UI (Experts Live branded)
 │   │   ├── StatusIndicator.svelte    # Activity/health dot overlay
+│   │   ├── SubtitleHistory.svelte    # Scrollable transcript history with timestamps
+│   │   ├── QrCode.svelte             # QR code canvas for sharing overlay URLs
 │   │   ├── AudioDeviceSelector.svelte
 │   │   ├── StyleControls.svelte      # Font, size, color, outline, position, animation
 │   │   ├── PhraseListEditor.svelte   # IT terminology phrase list
@@ -190,6 +226,8 @@ src/
 │   │   ├── session.ts                # Session lifecycle (start/stop orchestration)
 │   │   ├── speech.ts                 # Azure Speech SDK wrapper + auto-detect + profanity
 │   │   ├── audio.ts                  # Device enumeration, VU meter, disconnect detection
+│   │   ├── broadcast.ts              # BroadcastChannel sender (throttled subtitle + style sync)
+│   │   ├── broadcast-receiver.ts     # BroadcastChannel listener for overlay tabs
 │   │   ├── reconnection.ts           # Auto-reconnect with exponential backoff
 │   │   ├── transcript.ts             # Session recording + TXT/SRT export
 │   │   ├── wakelock.ts               # Screen Wake Lock API wrapper
@@ -198,7 +236,9 @@ src/
 │       ├── phrases.ts                # ~90 default IT/cloud/Azure terms
 │       └── url-params.ts             # URL query parameter read/write for shareable URLs
 ├── routes/
-│   ├── +page.svelte                  # Single page: config ↔ fullscreen toggle + shortcuts
+│   ├── +page.svelte                  # Operator page: config ↔ fullscreen toggle + shortcuts
+│   ├── overlay/
+│   │   └── +page.svelte              # Overlay output (receiver or standalone mode)
 │   ├── +layout.svelte
 │   └── +layout.ts                    # SSR disabled, prerender enabled
 ├── app.css                           # Tailwind v4 + Experts Live CSS variables
@@ -254,6 +294,7 @@ The left sidebar contains all settings:
 - **Subtitle Style** — font, size, color, text outline, position, alignment, max lines, and entry animation (None/Fade/Slide)
 - **Phrase List** — IT terminology that boosts recognition accuracy (pre-loaded with ~90 Azure/cloud/DevOps terms)
 - **Copy URL** — button in the header copies a shareable URL with current settings (Shift+click to include the Azure key)
+- **Overlay** — open overlay window, copy overlay URL (for OBS), scan QR code to share with crew
 
 ### Controls
 
@@ -265,6 +306,9 @@ The left sidebar contains all settings:
 | **Clear** | `C` | Clear displayed subtitles |
 | **Export** | | Download session transcript as TXT or SRT |
 | **Fullscreen** | `F` | Enter green-screen output mode |
+| **History** | | Toggle subtitle history panel (replaces preview) |
+| **Open Overlay** | | Open `/overlay` in a new window (receiver mode) |
+| **Copy Overlay URL** | | Copy overlay URL for OBS (Shift+click to include Azure key) |
 
 ### Fullscreen Green Screen
 
@@ -274,6 +318,77 @@ Press **F** or click **Fullscreen** to enter chroma-key mode:
 - Only subtitles are visible (no UI chrome)
 - Designed for OBS/vMix chroma key into a video feed
 - Press **Escape** to return to config
+
+### Overlay Route (`/overlay`)
+
+A dedicated output page for OBS browser sources, confidence monitors, and crew tablets. The overlay automatically selects the right operating mode:
+
+```mermaid
+flowchart TD
+    A[/overlay opened] --> B[Start BroadcastChannel listener]
+    B --> C{Message received\nwithin 2 seconds?}
+    C -->|Yes| D[Receiver mode\nPassive — synced to operator]
+    C -->|No| E[Read URL params]
+    E --> F{key + region\nin URL?}
+    F -->|Yes| G[Standalone mode\nStarts own Azure session]
+    F -->|No| H[Waiting mode\nShows 'Waiting for operator...']
+    D --> I[Render SubtitleDisplay]
+    G --> I
+    H --> I
+```
+
+**Receiver mode** — Subtitle and style data arrives via BroadcastChannel from the operator tab in the same browser. No Azure credentials needed. Use for confidence monitors and crew tablets on the same machine.
+
+**Standalone mode** — Reads settings from URL parameters and starts its own Azure session. Use for OBS browser sources (which run in an isolated process and can't receive BroadcastChannel messages).
+
+**Background color** — Controlled by the `?bg=` parameter:
+
+| Value | Result |
+|-------|--------|
+| `transparent` (default) | True alpha transparency (ideal for OBS) |
+| `green` | `#00FF00` chroma key green |
+| `black` | Black background |
+| Any hex color | Custom color (e.g. `#1B2A6B`) |
+
+A small semi-transparent status badge in the top-left corner shows: **Live** (receiving broadcast), **Standalone** (own session), or **Waiting...** (no data).
+
+### OBS Browser Source Setup
+
+Add `/overlay?bg=transparent` as an OBS browser source for true alpha transparency — no chroma key needed:
+
+1. In OBS, add a **Browser** source
+2. Set URL to `https://your-app.com/overlay?bg=transparent`
+3. Set width/height to match your scene (e.g. 1920x1080)
+4. For standalone mode (recommended for OBS), include Azure credentials in the URL:
+   `https://your-app.com/overlay?bg=transparent&region=westeurope&source=en-US&key=YOUR_KEY`
+5. Subtitles render with true alpha transparency over your scene
+
+> **Tip:** Use the **Copy Overlay URL** button in the operator panel (Shift+click to include the Azure key) to generate the URL.
+
+### Overlay Controls
+
+The operator panel status bar includes overlay management buttons:
+
+| Button | Action |
+|--------|--------|
+| **Open Overlay** | Opens `/overlay` in a new browser window (receiver mode) |
+| **Copy Overlay URL** | Copies the overlay URL with `?bg=transparent` for OBS. Shift+click to include the Azure key. |
+
+### Subtitle History
+
+Click the **History** button in the status bar to toggle a scrollable transcript view:
+
+- Shows all recognized lines with timestamps relative to session start
+- Auto-scrolls to the latest line; scrolling up pauses auto-scroll
+- **Copy All** button copies the full transcript to clipboard
+- Displays up to 100 lines (the existing buffer cap)
+
+### QR Code
+
+When the history panel is open, a QR code is displayed below it encoding the overlay URL (without Azure key). Crew members can scan it with a phone or tablet to open the overlay in their browser:
+
+- Same-device tabs use BroadcastChannel (receiver mode)
+- Cross-device opens show "Waiting for operator..." since BroadcastChannel is same-browser only
 
 ### Status Indicator
 
@@ -322,8 +437,11 @@ Pre-configure the app via URL query parameters — useful for bookmarking per-ro
 | `maxLines` | Max subtitle lines | `2` |
 | `position` | Subtitle position | `top`, `center`, `bottom` |
 | `align` | Text alignment | `left`, `center`, `right` |
+| `bg` | Background color (`/overlay` only) | `transparent`, `green`, `black`, `#1B2A6B` |
 
-Example: `https://your-app.com/?region=westeurope&source=nl-NL&target=en&fontSize=56`
+Examples:
+- Operator config: `https://your-app.com/?region=westeurope&source=nl-NL&target=en&fontSize=56`
+- OBS overlay: `https://your-app.com/overlay?bg=transparent&region=westeurope&source=en-US&key=YOUR_KEY`
 
 The `key` parameter is automatically removed from the browser address bar after loading to prevent accidental leaking in screenshots or bookmarks.
 
@@ -380,6 +498,7 @@ Features designed for reliability during multi-hour live conferences:
 - **Tab visibility handling** — when the browser tab is backgrounded and restored, the audio context is automatically resumed to prevent VU meter stalls.
 - **Partial text overflow fix** — when partial (in-progress) text is present, one line slot is reserved for it so the display never exceeds the configured `maxLines`.
 - **Derived connection state** — the Start/Stop button state is derived directly from the subtitle store's `connectionStatus`, eliminating UI desync if recognition fails to start.
+- **BroadcastChannel throttling** — partial-text-only updates to overlay tabs are throttled to max 5/sec (200ms), while final lines, status changes, and style changes are sent immediately. A 3-second ping heartbeat lets receivers detect operator disconnection.
 
 ## Deployment
 

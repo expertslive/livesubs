@@ -73,3 +73,24 @@ export function buildShareUrl(includeKey = false): string {
 	const base = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
 	return base + '?' + params.toString();
 }
+
+export function buildOverlayUrl(includeKey = false): string {
+	const s = get(settings);
+	const st = get(style);
+
+	const params = new URLSearchParams();
+	params.set('bg', 'transparent');
+	if (s.azureRegion) params.set('region', s.azureRegion);
+	if (s.sourceLanguage) params.set('source', s.sourceLanguage);
+	if (s.targetLanguage) params.set('target', s.targetLanguage);
+	if (includeKey && s.azureKey) params.set('key', s.azureKey);
+
+	if (st.fontFamily) params.set('font', st.fontFamily);
+	if (st.fontSize) params.set('fontSize', String(st.fontSize));
+	if (st.maxLines) params.set('maxLines', String(st.maxLines));
+	if (st.position) params.set('position', st.position);
+	if (st.textAlign) params.set('align', st.textAlign);
+
+	const base = typeof window !== 'undefined' ? window.location.origin + '/overlay' : '/overlay';
+	return base + '?' + params.toString();
+}
