@@ -745,9 +745,44 @@ Tests use `vi.useFakeTimers()` for deterministic timestamps, `vi.resetModules()`
 
 ## Deployment
 
-### Azure Static Web Apps
+### Azure Resources
 
-The repo includes a GitHub Actions workflow (`.github/workflows/azure-static-web-apps.yml`).
+LiveSubs runs on two Azure services deployed to the `livesubs-rg` resource group in **West Europe** (fallback: Sweden Central):
+
+```mermaid
+graph LR
+    subgraph "livesubs-rg (West Europe)"
+        SWA["Azure Static Web App\nlivesubs\nFree tier"]
+        SPE["Azure Speech Services\nlivesubs-speech\nS0 tier"]
+    end
+
+    GH["GitHub\nexpertslive/livesubs"] -->|"push to main\nGitHub Actions"| SWA
+    SWA -->|"serves static app\n(browser-direct)"| BR["User Browser"]
+    BR -->|"WebSocket\n(Speech SDK)"| SPE
+
+    style SWA fill:#2E7CC4,color:#fff
+    style SPE fill:#1B2A6B,color:#fff
+    style GH fill:#333,color:#fff
+```
+
+| Resource | Name | SKU | Location | Purpose |
+|----------|------|-----|----------|---------|
+| Resource Group | `livesubs-rg` | — | West Europe | Container for all resources |
+| Static Web App | `livesubs` | Free | West Europe | Hosts the SvelteKit static build |
+| Speech Services | `livesubs-speech` | S0 | West Europe | Speech-to-text and translation |
+
+### CI/CD Pipeline
+
+The repo includes a GitHub Actions workflow (`.github/workflows/azure-static-web-apps.yml`):
+
+```mermaid
+flowchart LR
+    A["git push main"] --> B["GitHub Actions"]
+    B --> C["npm ci"]
+    C --> D["npm run build"]
+    D --> E["Upload build/\nto Static Web App"]
+    E --> F["Live at\n*.azurestaticapps.net"]
+```
 
 1. Create an Azure Static Web App resource
 2. Add the deployment token as `AZURE_STATIC_WEB_APPS_API_TOKEN` in GitHub repo secrets
@@ -759,8 +794,10 @@ The repo includes a GitHub Actions workflow (`.github/workflows/azure-static-web
 |---------|------|
 | Azure Speech (STT) | ~$1.00/hour |
 | Azure Speech Translation | ~$2.50/hour |
-| Azure Static Web Apps | Free tier or ~$9/month |
+| Azure Static Web Apps | Free tier |
 | **Per 1-hour event** | **~$1.00–$2.50** |
+
+For a detailed cost breakdown including volume discounts, concurrent session pricing, and optimization tips, see [docs/azure-costs.md](docs/azure-costs.md).
 
 ## License
 
