@@ -23,8 +23,7 @@
 </script>
 
 <div class="space-y-3">
-	<div class="flex items-center justify-between">
-		<h3 class="text-sm font-semibold text-white">Subtitle Style</h3>
+	<div class="flex justify-end">
 		<button
 			onclick={resetDefaults}
 			{disabled}

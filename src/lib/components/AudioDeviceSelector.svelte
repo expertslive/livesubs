@@ -34,7 +34,6 @@
 </script>
 
 <div class="space-y-2">
-	<span class="block text-sm font-semibold text-white">Audio Input</span>
 	<div class="flex gap-2">
 		<select
 			bind:value={$settings.audioDeviceId}

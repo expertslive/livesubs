@@ -44,29 +44,24 @@
 </script>
 
 <div class="space-y-2">
-	<div class="flex items-center justify-between">
-		<h3 class="text-sm font-semibold text-white">
-			Phrase List ({$settings.phrases.length})
-		</h3>
-		<div class="flex gap-1">
-			<button
-				onclick={loadDefaults}
-				{disabled}
-				class="text-xs px-2 py-1 rounded hover:brightness-110 disabled:opacity-50"
-				style:background-color="var(--el-bg-light)"
-				style:color="var(--el-muted)"
-			>
-				Load Defaults
-			</button>
-			<button
-				onclick={clearAll}
-				{disabled}
-				class="text-xs px-2 py-1 rounded hover:brightness-110 text-red-400 disabled:opacity-50"
-				style:background-color="var(--el-bg-light)"
-			>
-				Clear
-			</button>
-		</div>
+	<div class="flex gap-1 justify-end">
+		<button
+			onclick={loadDefaults}
+			{disabled}
+			class="text-xs px-2 py-1 rounded hover:brightness-110 disabled:opacity-50"
+			style:background-color="var(--el-bg-light)"
+			style:color="var(--el-muted)"
+		>
+			Load Defaults
+		</button>
+		<button
+			onclick={clearAll}
+			{disabled}
+			class="text-xs px-2 py-1 rounded hover:brightness-110 text-red-400 disabled:opacity-50"
+			style:background-color="var(--el-bg-light)"
+		>
+			Clear
+		</button>
 	</div>
 
 	<div class="flex gap-2">
@@ -104,7 +99,7 @@
 				<button
 					onclick={() => removePhrase(phrase)}
 					{disabled}
-					class="text-red-400 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 ml-2"
+					class="text-red-400 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 ml-2 p-1 -m-0.5 md:p-0 md:m-0"
 					title="Remove"
 				>
 					x

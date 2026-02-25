@@ -21,6 +21,42 @@
 
 	let { onFullscreen }: Props = $props();
 
+	// --- Responsive sidebar ---
+	let sidebarOpen = $state(false);
+
+	function closeSidebar() {
+		sidebarOpen = false;
+	}
+
+	$effect(() => {
+		if (!sidebarOpen) return;
+		const handleEscape = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') sidebarOpen = false;
+		};
+		window.addEventListener('keydown', handleEscape);
+		return () => window.removeEventListener('keydown', handleEscape);
+	});
+
+	// --- Collapsible sections ---
+	let expandedSections = $state<Record<string, boolean>>({
+		azure: true,
+		language: true,
+		audio: false,
+		style: false,
+		alerts: false,
+		phrases: false
+	});
+
+	function toggleSection(section: string) {
+		expandedSections[section] = !expandedSections[section];
+	}
+
+	// --- Setup validation ---
+	let configValid = $derived(
+		$settings.azureKey.trim() !== '' && $settings.azureRegion.trim() !== ''
+	);
+
+	// --- Existing state ---
 	let running = $derived(
 		['connecting', 'connected', 'reconnecting'].includes($subtitles.connectionStatus)
 	);
@@ -49,7 +85,7 @@
 			const current = s.autoDetectLanguages;
 			const idx = current.indexOf(lang);
 			if (idx >= 0) {
-				if (current.length <= 2) return s; // minimum 2
+				if (current.length <= 2) return s;
 				return { ...s, autoDetectLanguages: current.filter((l) => l !== lang) };
 			}
 			return { ...s, autoDetectLanguages: [...current, lang] };
@@ -266,15 +302,84 @@
 	});
 </script>
 
-<div class="h-screen flex" style:background="linear-gradient(135deg, var(--el-navy), var(--el-bg))">
+<div class="h-screen flex flex-col md:flex-row" style:background="linear-gradient(135deg, var(--el-navy), var(--el-bg))">
+	<!-- Mobile top bar -->
+	<div
+		class="flex md:hidden items-center gap-2 px-3 py-2 border-b border-white/10 shrink-0"
+		style:background-color="var(--el-navy)"
+	>
+		<button
+			onclick={() => { sidebarOpen = !sidebarOpen; }}
+			class="p-2 rounded text-white hover:bg-white/10 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+			aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+		>
+			<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+				<path d="M4 6h16M4 12h16M4 18h16" />
+			</svg>
+		</button>
+
+		<div class="flex items-center gap-1.5" role="status">
+			<span
+				class="w-2 h-2 rounded-full shrink-0"
+				aria-hidden="true"
+				style:background-color={statusColor}
+			></span>
+			<span class="text-xs font-medium truncate" style:color={statusColor}>{statusLabel}</span>
+		</div>
+
+		<div class="ml-auto flex items-center gap-2">
+			{#if !running && !demoRunning}
+				<button
+					onclick={handleStart}
+					disabled={!configValid}
+					class="rounded px-3 py-1.5 text-xs font-bold text-white hover:brightness-110 transition-all disabled:opacity-50 min-h-[44px]"
+					style:background-color="var(--el-accent)"
+					title={!configValid ? 'Enter Azure Speech key and region to begin' : 'Start session'}
+				>
+					Start
+				</button>
+			{:else}
+				<button
+					onclick={handleStop}
+					class="rounded px-3 py-1.5 text-xs font-bold text-white hover:brightness-110 transition-all min-h-[44px]"
+					style:background-color="#DC2626"
+				>
+					Stop
+				</button>
+			{/if}
+			<button
+				onclick={onFullscreen}
+				class="p-2 rounded text-white hover:bg-white/10 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+				title="Fullscreen"
+				aria-label="Toggle fullscreen mode"
+			>
+				<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+				</svg>
+			</button>
+		</div>
+	</div>
+
+	<!-- Backdrop overlay for mobile drawer -->
+	{#if sidebarOpen}
+		<button
+			class="fixed inset-0 bg-black/50 z-40 md:hidden"
+			onclick={closeSidebar}
+			aria-label="Close sidebar"
+			tabindex="-1"
+		></button>
+	{/if}
+
 	<!-- Sidebar -->
 	<aside
 		aria-label="Configuration"
-		class="w-80 flex flex-col overflow-y-auto shrink-0"
+		class="fixed inset-y-0 left-0 z-50 w-80 transition-transform duration-300 ease-in-out md:static md:z-auto md:!translate-x-0 flex flex-col overflow-y-auto shrink-0"
+		class:-translate-x-full={!sidebarOpen}
+		class:translate-x-0={sidebarOpen}
 		style:background-color="var(--el-navy)"
 	>
 		<!-- Header -->
-		<header class="p-4 border-b border-white/10">
+		<header class="p-3 md:p-4 border-b border-white/10">
 			<div class="flex items-center gap-3">
 				<img src="/logo.png" alt="Experts Live" class="h-10" />
 				<div>
@@ -295,155 +400,254 @@
 		</header>
 
 		<!-- Config sections -->
-		<div class="flex-1 p-4 space-y-5 overflow-y-auto">
-			<!-- Presets -->
+		<div class="flex-1 p-3 md:p-4 space-y-4 overflow-y-auto">
+			<!-- Presets (always visible) -->
 			<PresetManager disabled={running} />
 
-			<!-- Azure Settings -->
-			<div class="space-y-2">
-				<h3 class="text-sm font-semibold text-white">Azure Speech</h3>
-				<div>
-					<label class="block text-xs mb-1" style:color="var(--el-muted)">Speech Key
-					<input
-						type="password"
-						bind:value={$settings.azureKey}
-						disabled={running}
-						placeholder="Enter Azure Speech key"
-						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 placeholder:text-[var(--el-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
-						style:background-color="var(--el-bg-light)"
-					/>
-					</label>
-				</div>
-				<div>
-					<label class="block text-xs mb-1" style:color="var(--el-muted)">Region
-					<input
-						type="text"
-						bind:value={$settings.azureRegion}
-						disabled={running}
-						placeholder="e.g. westeurope"
-						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 placeholder:text-[var(--el-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
-						style:background-color="var(--el-bg-light)"
-					/>
-					</label>
-				</div>
+			<!-- Azure Settings (collapsible) -->
+			<div>
+				<button
+					class="flex items-center justify-between w-full text-left py-1"
+					onclick={() => toggleSection('azure')}
+					aria-expanded={expandedSections.azure}
+				>
+					<h3 class="text-sm font-semibold text-white flex items-center gap-2">
+						Azure Speech
+						{#if configValid}
+							<span class="text-green-400 text-xs" title="Configuration complete">&#10003;</span>
+						{:else}
+							<span class="text-amber-400 text-xs" title="Key and region required">&#9888;</span>
+						{/if}
+					</h3>
+					<svg class="w-4 h-4 shrink-0 transition-transform duration-200" class:-rotate-90={!expandedSections.azure} style:color="var(--el-muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if expandedSections.azure}
+					<div class="mt-2 space-y-2">
+						<div>
+							<label class="block text-xs mb-1" style:color="var(--el-muted)">Speech Key
+							<input
+								type="password"
+								bind:value={$settings.azureKey}
+								disabled={running}
+								placeholder="Enter Azure Speech key"
+								class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 placeholder:text-[var(--el-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
+								style:background-color="var(--el-bg-light)"
+							/>
+							</label>
+						</div>
+						<div>
+							<label class="block text-xs mb-1" style:color="var(--el-muted)">Region
+							<input
+								type="text"
+								bind:value={$settings.azureRegion}
+								disabled={running}
+								placeholder="e.g. westeurope"
+								class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 placeholder:text-[var(--el-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
+								style:background-color="var(--el-bg-light)"
+							/>
+							</label>
+						</div>
+						{#if !configValid}
+							<p class="text-xs" style:color="var(--el-muted)">Enter your Azure Speech key and region to begin</p>
+						{/if}
+					</div>
+				{/if}
 			</div>
 
-			<!-- Language -->
-			<div class="space-y-2">
-				<h3 class="text-sm font-semibold text-white">Language</h3>
-				<div>
-					<label class="block text-xs mb-1" style:color="var(--el-muted)">Source Language
-					<select
-						bind:value={$settings.sourceLanguage}
-						disabled={running}
-						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
-						style:background-color="var(--el-bg-light)"
-					>
-						{#each sourceLanguages as lang}
-							<option value={lang.value}>{lang.label}</option>
-						{/each}
-					</select>
-					</label>
-				</div>
-				{#if $settings.sourceLanguage === 'auto'}
-					<div class="rounded p-2 border border-white/10" style:background-color="var(--el-bg-light)">
-						<span class="block text-xs mb-1.5" style:color="var(--el-muted)">Candidate Languages (min 2)</span>
-						<div class="grid grid-cols-2 gap-1">
-							{#each autoDetectCandidates as lang}
-								<label class="flex items-center gap-1.5 text-xs cursor-pointer" style:color="var(--el-muted)">
-									<input
-										type="checkbox"
-										checked={$settings.autoDetectLanguages.includes(lang.value)}
-										onchange={() => toggleAutoDetectLang(lang.value)}
-										disabled={running}
-										class="accent-[var(--el-accent)] disabled:opacity-50"
-									/>
-									{lang.label}
-								</label>
-							{/each}
+			<!-- Language (collapsible) -->
+			<div>
+				<button
+					class="flex items-center justify-between w-full text-left py-1"
+					onclick={() => toggleSection('language')}
+					aria-expanded={expandedSections.language}
+				>
+					<h3 class="text-sm font-semibold text-white">Language</h3>
+					<svg class="w-4 h-4 shrink-0 transition-transform duration-200" class:-rotate-90={!expandedSections.language} style:color="var(--el-muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if expandedSections.language}
+					<div class="mt-2 space-y-2">
+						<div>
+							<label class="block text-xs mb-1" style:color="var(--el-muted)">Source Language
+							<select
+								bind:value={$settings.sourceLanguage}
+								disabled={running}
+								class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
+								style:background-color="var(--el-bg-light)"
+							>
+								{#each sourceLanguages as lang}
+									<option value={lang.value}>{lang.label}</option>
+								{/each}
+							</select>
+							</label>
+						</div>
+						{#if $settings.sourceLanguage === 'auto'}
+							<div class="rounded p-2 border border-white/10" style:background-color="var(--el-bg-light)">
+								<span class="block text-xs mb-1.5" style:color="var(--el-muted)">Candidate Languages (min 2)</span>
+								<div class="grid grid-cols-2 gap-1">
+									{#each autoDetectCandidates as lang}
+										<label class="flex items-center gap-1.5 text-xs cursor-pointer" style:color="var(--el-muted)">
+											<input
+												type="checkbox"
+												checked={$settings.autoDetectLanguages.includes(lang.value)}
+												onchange={() => toggleAutoDetectLang(lang.value)}
+												disabled={running}
+												class="accent-[var(--el-accent)] disabled:opacity-50"
+											/>
+											{lang.label}
+										</label>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						<div>
+							<label class="block text-xs mb-1" style:color="var(--el-muted)">Translate To
+							<select
+								bind:value={$settings.targetLanguage}
+								disabled={running}
+								class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
+								style:background-color="var(--el-bg-light)"
+							>
+								{#each targetLanguages as lang}
+									<option value={lang.value}>{lang.label}</option>
+								{/each}
+							</select>
+							</label>
+						</div>
+						<div>
+							<label class="block text-xs mb-1" style:color="var(--el-muted)">Profanity Filter
+							<select
+								bind:value={$settings.profanityFilter}
+								disabled={running}
+								class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
+								style:background-color="var(--el-bg-light)"
+							>
+								<option value="masked">Masked (***)</option>
+								<option value="removed">Removed</option>
+								<option value="raw">Raw (no filter)</option>
+							</select>
+							</label>
 						</div>
 					</div>
 				{/if}
-				<div>
-					<label class="block text-xs mb-1" style:color="var(--el-muted)">Translate To
-					<select
-						bind:value={$settings.targetLanguage}
-						disabled={running}
-						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
-						style:background-color="var(--el-bg-light)"
-					>
-						{#each targetLanguages as lang}
-							<option value={lang.value}>{lang.label}</option>
-						{/each}
-					</select>
-					</label>
-				</div>
-				<div>
-					<label class="block text-xs mb-1" style:color="var(--el-muted)">Profanity Filter
-					<select
-						bind:value={$settings.profanityFilter}
-						disabled={running}
-						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
-						style:background-color="var(--el-bg-light)"
-					>
-						<option value="masked">Masked (***)</option>
-						<option value="removed">Removed</option>
-						<option value="raw">Raw (no filter)</option>
-					</select>
-					</label>
-				</div>
 			</div>
 
-			<!-- Audio Device -->
-			<AudioDeviceSelector disabled={running} />
-
-			<!-- Style Controls -->
-			<StyleControls disabled={running} />
-
-			<!-- Alerts -->
-			<div class="space-y-2">
-				<h3 class="text-sm font-semibold text-white">Alerts</h3>
-				<div>
-					<label class="block text-xs mb-1" style:color="var(--el-muted)">Silence threshold (seconds)
-					<input
-						type="number"
-						min="5"
-						max="120"
-						bind:value={$settings.silenceThresholdSeconds}
-						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)]"
-						style:background-color="var(--el-bg-light)"
-					/>
-					</label>
-				</div>
-				<label class="flex items-center gap-2 text-xs cursor-pointer" style:color="var(--el-muted)">
-					<input
-						type="checkbox"
-						bind:checked={$settings.silenceAudioAlert}
-						class="accent-[var(--el-accent)]"
-					/>
-					Audio beep on silence
-				</label>
+			<!-- Audio Device (collapsible) -->
+			<div>
+				<button
+					class="flex items-center justify-between w-full text-left py-1"
+					onclick={() => toggleSection('audio')}
+					aria-expanded={expandedSections.audio}
+				>
+					<h3 class="text-sm font-semibold text-white">Audio Input</h3>
+					<svg class="w-4 h-4 shrink-0 transition-transform duration-200" class:-rotate-90={!expandedSections.audio} style:color="var(--el-muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if expandedSections.audio}
+					<div class="mt-2">
+						<AudioDeviceSelector disabled={running} />
+					</div>
+				{/if}
 			</div>
 
-			<!-- Phrase List -->
-			<PhraseListEditor disabled={running} />
+			<!-- Style Controls (collapsible) -->
+			<div>
+				<button
+					class="flex items-center justify-between w-full text-left py-1"
+					onclick={() => toggleSection('style')}
+					aria-expanded={expandedSections.style}
+				>
+					<h3 class="text-sm font-semibold text-white">Subtitle Style</h3>
+					<svg class="w-4 h-4 shrink-0 transition-transform duration-200" class:-rotate-90={!expandedSections.style} style:color="var(--el-muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if expandedSections.style}
+					<div class="mt-2">
+						<StyleControls disabled={running} />
+					</div>
+				{/if}
+			</div>
+
+			<!-- Alerts (collapsible) -->
+			<div>
+				<button
+					class="flex items-center justify-between w-full text-left py-1"
+					onclick={() => toggleSection('alerts')}
+					aria-expanded={expandedSections.alerts}
+				>
+					<h3 class="text-sm font-semibold text-white">Alerts</h3>
+					<svg class="w-4 h-4 shrink-0 transition-transform duration-200" class:-rotate-90={!expandedSections.alerts} style:color="var(--el-muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if expandedSections.alerts}
+					<div class="mt-2 space-y-2">
+						<div>
+							<label class="block text-xs mb-1" style:color="var(--el-muted)">Silence threshold (seconds)
+							<input
+								type="number"
+								min="5"
+								max="120"
+								bind:value={$settings.silenceThresholdSeconds}
+								class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)]"
+								style:background-color="var(--el-bg-light)"
+							/>
+							</label>
+						</div>
+						<label class="flex items-center gap-2 text-xs cursor-pointer" style:color="var(--el-muted)">
+							<input
+								type="checkbox"
+								bind:checked={$settings.silenceAudioAlert}
+								class="accent-[var(--el-accent)]"
+							/>
+							Audio beep on silence
+						</label>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Phrase List (collapsible) -->
+			<div>
+				<button
+					class="flex items-center justify-between w-full text-left py-1"
+					onclick={() => toggleSection('phrases')}
+					aria-expanded={expandedSections.phrases}
+				>
+					<h3 class="text-sm font-semibold text-white">Phrase List ({$settings.phrases.length})</h3>
+					<svg class="w-4 h-4 shrink-0 transition-transform duration-200" class:-rotate-90={!expandedSections.phrases} style:color="var(--el-muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if expandedSections.phrases}
+					<div class="mt-2">
+						<PhraseListEditor disabled={running} />
+					</div>
+				{/if}
+			</div>
 		</div>
 
 		<!-- Controls -->
-		<div class="p-4 border-t border-white/10 space-y-3">
+		<div class="p-3 md:p-4 border-t border-white/10 space-y-3">
 			<div class="flex gap-2">
 				{#if !running && !demoRunning}
 					<button
 						onclick={handleStart}
-						class="flex-1 rounded py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
+						disabled={!configValid}
+						class="flex-1 rounded py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all disabled:opacity-50 min-h-[44px]"
 						style:background-color="var(--el-accent)"
+						title={!configValid ? 'Enter Azure Speech key and region to begin' : ''}
 					>
 						Start
 					</button>
 				{:else}
 					<button
 						onclick={handleStop}
-						class="flex-1 rounded py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
+						class="flex-1 rounded py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all min-h-[44px]"
 						style:background-color="#DC2626"
 					>
 						Stop
@@ -452,7 +656,7 @@
 				<button
 					onclick={handleDemo}
 					disabled={running}
-					class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all disabled:opacity-50"
+					class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all disabled:opacity-50 min-h-[44px]"
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Demo mode with sample text"
@@ -464,7 +668,7 @@
 			<div class="flex gap-2">
 				<button
 					onclick={handleClear}
-					class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
+					class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all min-h-[44px]"
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Clear subtitles"
@@ -475,7 +679,7 @@
 				<div class="relative">
 					<button
 						onclick={() => { updateTranscriptCount(); showExportMenu = !showExportMenu; }}
-						class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
+						class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all min-h-[44px]"
 						style:background-color="var(--el-bg-light)"
 						style:color="var(--el-muted)"
 						title="Export transcript"
@@ -505,7 +709,7 @@
 				</div>
 				<button
 					onclick={onFullscreen}
-					class="ml-auto rounded px-3 py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
+					class="ml-auto rounded px-3 py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all min-h-[44px]"
 					style:background-color="var(--el-blue)"
 					title="Fullscreen (F)"
 					aria-label="Toggle fullscreen mode"
@@ -517,10 +721,10 @@
 	</aside>
 
 	<!-- Main area -->
-	<main aria-label="Subtitle output" class="flex-1 flex flex-col">
+	<main aria-label="Subtitle output" class="flex-1 flex flex-col min-h-0 min-w-0">
 		<!-- Status bar -->
 		<div
-			class="flex items-center gap-3 px-4 py-2 border-b border-white/10"
+			class="flex items-center flex-wrap gap-2 md:gap-3 px-3 md:px-4 py-2 border-b border-white/10"
 			style:background-color="var(--el-bg)"
 		>
 			<div class="flex items-center gap-2" role="status">
@@ -543,7 +747,7 @@
 			<!-- VU Meter -->
 			{#if running}
 				<div class="flex items-center gap-2">
-					<span class="text-xs" style:color="var(--el-muted)">Audio</span>
+					<span class="text-xs hidden md:inline" style:color="var(--el-muted)">Audio</span>
 					<div class="w-24 h-2 rounded-full overflow-hidden" style:background-color="var(--el-bg-light)">
 						<div
 							class="h-full rounded-full transition-all duration-100"
@@ -554,13 +758,13 @@
 				</div>
 				{#if silenceWarning}
 					<span class="text-xs font-semibold px-2 py-0.5 rounded-full animate-pulse" style="background-color: rgba(245, 158, 11, 0.2); color: #F59E0B;">
-						Silence: {silenceSeconds}s
+						<span class="hidden md:inline">Silence: </span>{silenceSeconds}s
 					</span>
 					<span class="sr-only" role="alert">Silence detected for {silenceSeconds} seconds</span>
 				{/if}
 			{/if}
 
-			<div class="ml-auto flex items-center gap-2">
+			<div class="ml-auto flex items-center gap-1 md:gap-2">
 				<button
 					onclick={() => { showHistory = !showHistory; }}
 					class="text-xs px-2 py-1 rounded hover:brightness-110 transition-all"
@@ -579,11 +783,11 @@
 					title="Open overlay in new window"
 					aria-label="Open overlay in new window"
 				>
-					Open Overlay
+					<span class="hidden md:inline">Open </span>Overlay
 				</button>
 				<button
 					onclick={handleCopyOverlayUrl}
-					class="text-xs px-2 py-1 rounded hover:brightness-110 transition-all"
+					class="text-xs px-2 py-1 rounded hover:brightness-110 transition-all hidden md:inline-flex"
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Copy overlay URL for OBS (Shift+click to include Azure key)"
@@ -595,7 +799,7 @@
 		</div>
 
 		<!-- Manual text input + Quick messages -->
-		<div class="px-4 py-2 space-y-2 border-b border-white/10" style:background-color="var(--el-bg)">
+		<div class="px-3 md:px-4 py-2 space-y-2 border-b border-white/10" style:background-color="var(--el-bg)">
 			<div class="flex gap-2">
 				<input
 					bind:this={manualTextInput}
@@ -609,7 +813,7 @@
 				<button
 					onclick={handleManualSend}
 					disabled={!manualText.trim()}
-					class="rounded px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-all disabled:opacity-50"
+					class="rounded px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-all disabled:opacity-50 min-h-[44px]"
 					style:background-color="var(--el-accent)"
 				>
 					Send

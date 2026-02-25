@@ -63,7 +63,7 @@
 		{:else}
 			<button
 				onclick={() => handleSend(msg.text)}
-				class="rounded-full px-3 py-1 text-xs font-medium transition-all hover:brightness-110"
+				class="rounded-full px-3 py-1 min-h-[44px] md:min-h-0 text-xs font-medium transition-all hover:brightness-110 flex items-center"
 				style:background-color="var(--el-bg-light)"
 				style:color="white"
 			>

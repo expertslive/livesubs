@@ -9,8 +9,10 @@
 	import { startBroadcasting, stopBroadcasting } from '$lib/services/broadcast';
 	import ConfigPanel from '$lib/components/ConfigPanel.svelte';
 	import SubtitleDisplay from '$lib/components/SubtitleDisplay.svelte';
+	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 
 	let isFullscreen = $state(false);
+	let showShortcuts = $state(false);
 	let fullscreenEl: HTMLDivElement | undefined = $state();
 
 	async function toggleFullscreen() {
@@ -62,6 +64,10 @@
 				event.preventDefault();
 				window.dispatchEvent(new CustomEvent('livesubs:focus-manual-input'));
 				break;
+			case '?':
+				event.preventDefault();
+				showShortcuts = !showShortcuts;
+				break;
 		}
 	}
 
@@ -111,6 +117,10 @@
 >
 	<SubtitleDisplay />
 </div>
+
+{#if showShortcuts}
+	<KeyboardShortcuts onClose={() => { showShortcuts = false; }} />
+{/if}
 
 <style>
 	.config-view {

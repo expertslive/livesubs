@@ -2,7 +2,7 @@
 
 Real-time subtitling app for **Experts Live** IT conferences. Captures audio from a microphone or virtual audio device, transcribes speech using Azure Cognitive Services, optionally translates between languages, and displays configurable subtitles on a chroma-key green screen or transparent overlay.
 
-Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, session transcript export, OBS browser source integration, multi-output sync via BroadcastChannel, operator live controls (manual text injection, quick messages, inline line correction, silence detection with audio alerts), and operator-friendly features like keyboard shortcuts, shareable config URLs, QR codes, subtitle history, and settings presets.
+Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, session transcript export, OBS browser source integration, multi-output sync via BroadcastChannel, operator live controls (manual text injection, quick messages, inline line correction, silence detection with audio alerts), and operator-friendly features like keyboard shortcuts, shareable config URLs, QR codes, subtitle history, and settings presets. The operator interface is fully responsive — usable on phones and tablets with a collapsible drawer sidebar, mobile control strip, and touch-friendly tap targets.
 
 ![Experts Live](static/logo.png)
 
@@ -268,7 +268,8 @@ src/
 │   │   ├── StyleControls.svelte      # Font, size, color, outline, position, animation
 │   │   ├── PhraseListEditor.svelte   # IT terminology phrase list
 │   │   ├── PresetManager.svelte      # Save/load named configuration presets
-│   │   └── QuickMessages.svelte      # Quick message pills with edit mode
+│   │   ├── QuickMessages.svelte      # Quick message pills with edit mode
+│   │   └── KeyboardShortcuts.svelte  # Modal overlay listing all keyboard shortcuts
 │   ├── stores/
 │   │   ├── settings.ts               # Azure key, region, languages, device, phrases, profanity, alerts
 │   │   ├── settings.test.ts          # Settings store tests (defaults, persistence, merging)
@@ -296,7 +297,7 @@ src/
 │       ├── url-params.ts             # URL query parameter read/write for shareable URLs
 │       └── url-params.test.ts        # URL params tests (build, apply, key stripping)
 ├── routes/
-│   ├── +page.svelte                  # Operator page: config ↔ fullscreen toggle + shortcuts
+│   ├── +page.svelte                  # Operator page: config ↔ fullscreen toggle + shortcuts + help modal
 │   ├── +error.svelte                 # Branded error page with reload/home actions
 │   ├── overlay/
 │   │   └── +page.svelte              # Overlay output (receiver or standalone mode)
@@ -348,10 +349,26 @@ Output is written to `build/` — a fully static site ready for any static host.
 
 ### Config Panel
 
-The left sidebar contains all settings:
+The sidebar contains all settings. On desktop (768px+) it is always visible; on mobile it collapses into a slide-out drawer activated by the hamburger button. Each section is collapsible — **Azure Speech** and **Language** are expanded by default, others are collapsed to reduce clutter.
 
-- **Presets** — save and load named configurations for recurring rooms/events
-- **Azure Speech** — subscription key and region
+```mermaid
+flowchart LR
+    subgraph "Desktop ≥ 768px"
+        direction LR
+        SB1["Sidebar\n(static, always visible)"] --- MA1["Main area\n(preview + status)"]
+    end
+
+    subgraph "Mobile < 768px"
+        direction TB
+        TB1["Top bar\n☰ Status Start Fullscreen"] --> MA2["Main area\n(full width)"]
+        DR1["Drawer overlay\n(slide from left)"] -.->|hamburger tap| MA2
+    end
+```
+
+A **mobile top bar** (visible only below 768px) provides one-tap access to Start/Stop, connection status, and Fullscreen without opening the drawer.
+
+- **Presets** — save and load named configurations for recurring rooms/events (always visible at top)
+- **Azure Speech** — subscription key and region. A validation badge shows a green checkmark when both fields are filled, or an amber warning when either is missing. The **Start** button is disabled until configuration is valid.
 - **Language** — source language (English, Dutch, German, French, Spanish, or **Auto-detect**), optional translation target, and profanity filter (Masked/Removed/Raw)
 - **Audio Input** — select microphone or virtual audio device
 - **Subtitle Style** — font, size, color, text outline, position, alignment, max lines, and entry animation (None/Fade/Slide)
@@ -374,6 +391,7 @@ The left sidebar contains all settings:
 | **History** | | Toggle subtitle history panel (replaces preview) |
 | **Open Overlay** | | Open `/overlay` in a new window (receiver mode) |
 | **Copy Overlay URL** | | Copy overlay URL for OBS (Shift+click to include Azure key) |
+| **?** (keyboard) | `?` | Show keyboard shortcuts help modal |
 
 ### Fullscreen Green Screen
 
@@ -516,7 +534,7 @@ The entry count is shown on the Export button.
 
 ### Keyboard Shortcuts
 
-All shortcuts are disabled when focus is in a text input, select, or textarea.
+All shortcuts are disabled when focus is in a text input, select, or textarea. Press `?` at any time to open an in-app help modal listing all available shortcuts.
 
 | Key | Action |
 |-----|--------|
@@ -524,7 +542,8 @@ All shortcuts are disabled when focus is in a text input, select, or textarea.
 | `C` | Clear subtitles |
 | `F` | Toggle fullscreen green screen |
 | `T` | Focus manual text input |
-| `Escape` | Exit fullscreen / blur manual text input |
+| `?` | Show keyboard shortcuts help modal |
+| `Escape` | Exit fullscreen / blur manual text input / close sidebar drawer / close help modal |
 
 ### URL Parameters
 
@@ -605,7 +624,40 @@ Features designed for reliability during multi-hour live conferences:
 - **Derived connection state** — the Start/Stop button state is derived directly from the subtitle store's `connectionStatus`, eliminating UI desync if recognition fails to start.
 - **BroadcastChannel throttling** — partial-text-only updates to overlay tabs are throttled to max 5/sec (200ms), while final lines, status changes, and style changes are sent immediately. A 3-second ping heartbeat lets receivers detect operator disconnection.
 - **Error boundaries** — a branded SvelteKit error page (`+error.svelte`) catches unhandled route errors with reload/home actions. Clipboard operations are wrapped in try/catch to prevent unhandled rejections when clipboard access is denied. The overlay `init()` is wrapped in try/catch so OBS browser sources stay in "waiting" mode rather than showing a white screen on init failure.
+- **Setup validation** — the Start button is disabled until Azure Speech key and region are both filled. A validation badge on the Azure section header gives immediate visual feedback (green checkmark or amber warning).
 - **Test suite** — 60 unit tests across 7 test files covering all stores, services, and utilities. See [Testing](#testing).
+
+## Responsive Design
+
+The operator interface adapts to phone, tablet, and desktop viewports. The `md:` breakpoint (768px) controls the layout mode:
+
+```mermaid
+flowchart TD
+    A["Viewport width"] --> B{"≥ 768px?"}
+    B -->|Yes| C["Desktop layout"]
+    B -->|No| D["Mobile layout"]
+
+    C --> C1["Static sidebar (320px)\nalways visible"]
+    C --> C2["Main area beside sidebar"]
+    C --> C3["Full status bar\nwith labels"]
+
+    D --> D1["Sidebar hidden\n(slide-out drawer)"]
+    D --> D2["Top bar: ☰ status Start ⛶"]
+    D --> D3["Compact status bar\nicons only, flex-wrap"]
+    D --> D4["44px min touch targets\non all interactive elements"]
+```
+
+| Feature | Mobile (< 768px) | Desktop (≥ 768px) |
+|---------|-------------------|-------------------|
+| Sidebar | Drawer overlay with backdrop | Static, always visible |
+| Start/Stop | In top bar (always accessible) | In sidebar footer |
+| Status | Compact in top bar | Full status bar with labels |
+| VU meter | Bar only (no "Audio" label) | Bar + "Audio" label |
+| Silence warning | `Xs` (no "Silence:" prefix) | `Silence: Xs` |
+| Overlay buttons | "Overlay" (short label), Copy URL hidden | "Open Overlay", "Copy Overlay URL" |
+| Quick messages | 44px min-height tap targets | Compact pills |
+| Phrase remove | Always visible, padded touch area | Hover-to-reveal |
+| Config sections | Collapsible accordions | Collapsible accordions |
 
 ## Accessibility
 
@@ -635,6 +687,9 @@ flowchart LR
 - **Connection status** — the status bar indicator has `role="status"` so connection changes are announced; the decorative color dot has `aria-hidden="true"`
 - **Button labels** — all buttons with icon-only or ambiguous text have descriptive `aria-label` attributes (Copy URL, Demo, Clear, Export, Fullscreen, History, Overlay buttons, Quick Messages add/remove)
 - **Silence alert** — a visually-hidden `role="alert"` span announces silence detection to screen readers ("Silence detected for X seconds")
+- **Collapsible sections** — each config section toggle uses `aria-expanded` to communicate open/closed state to assistive technology
+- **Touch targets** — all interactive elements meet the WCAG 2.5.5 minimum of 44x44px on mobile viewports
+- **Keyboard shortcuts modal** — press `?` to discover all shortcuts; modal traps focus and closes on `Escape`
 
 ## Testing
 
