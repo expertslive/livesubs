@@ -172,4 +172,22 @@
 		/>
 		</label>
 	</div>
+
+	<!-- Animation -->
+	<div>
+		<span class="block text-xs mb-1" style:color="var(--el-muted)">Animation</span>
+		<div class="flex gap-1">
+			{#each [['none', 'None'], ['fade', 'Fade'], ['slide', 'Slide']] as [value, label]}
+				<button
+					onclick={() => ($style.animation = value as 'none' | 'fade' | 'slide')}
+					{disabled}
+					class="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors disabled:opacity-50"
+					style:background-color={$style.animation === value ? 'var(--el-accent)' : 'var(--el-bg-light)'}
+					style:color={$style.animation === value ? 'white' : 'var(--el-muted)'}
+				>
+					{label}
+				</button>
+			{/each}
+		</div>
+	</div>
 </div>

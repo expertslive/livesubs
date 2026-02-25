@@ -16,6 +16,7 @@ export interface SubtitleState {
 	errorMessage: string;
 	audioLevel: number;
 	lastActivityTimestamp: number;
+	sessionStartTime: number;
 }
 
 const defaultState: SubtitleState = {
@@ -24,7 +25,8 @@ const defaultState: SubtitleState = {
 	connectionStatus: 'disconnected',
 	errorMessage: '',
 	audioLevel: 0,
-	lastActivityTimestamp: 0
+	lastActivityTimestamp: 0,
+	sessionStartTime: 0
 };
 
 function createSubtitleStore() {
@@ -65,6 +67,10 @@ function createSubtitleStore() {
 
 		setAudioLevel(level: number) {
 			update((state) => ({ ...state, audioLevel: level }));
+		},
+
+		setSessionStart(time: number) {
+			update((state) => ({ ...state, sessionStartTime: time }));
 		},
 
 		clear() {

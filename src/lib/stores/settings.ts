@@ -1,5 +1,7 @@
 import { writable } from 'svelte/store';
 
+export type ProfanityFilter = 'raw' | 'masked' | 'removed';
+
 export interface Settings {
 	azureKey: string;
 	azureRegion: string;
@@ -7,6 +9,8 @@ export interface Settings {
 	targetLanguage: string;
 	audioDeviceId: string;
 	phrases: string[];
+	profanityFilter: ProfanityFilter;
+	autoDetectLanguages: string[];
 }
 
 const defaultSettings: Settings = {
@@ -15,7 +19,9 @@ const defaultSettings: Settings = {
 	sourceLanguage: 'en-US',
 	targetLanguage: '',
 	audioDeviceId: '',
-	phrases: []
+	phrases: [],
+	profanityFilter: 'masked',
+	autoDetectLanguages: ['en-US', 'nl-NL', 'de-DE']
 };
 
 function createSettingsStore() {

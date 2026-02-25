@@ -10,6 +10,7 @@ let recognizer: SpeechSDK.SpeechRecognizer | SpeechSDK.TranslationRecognizer | n
 function needsTranslation(): boolean {
 	const s = get(settings);
 	if (!s.targetLanguage) return false;
+	if (s.sourceLanguage === 'auto') return true;
 	// Compare base language codes (e.g., "en" from "en-US" vs "en")
 	const sourceBase = s.sourceLanguage.split('-')[0];
 	return sourceBase !== s.targetLanguage;
@@ -25,6 +26,15 @@ function getTargetLanguageBcp47(targetLang: string): string {
 		es: 'es'
 	};
 	return map[targetLang] || targetLang;
+}
+
+function applyProfanityFilter(config: SpeechSDK.SpeechConfig | SpeechSDK.SpeechTranslationConfig, filter: string) {
+	const profanityMap: Record<string, SpeechSDK.ProfanityOption> = {
+		raw: SpeechSDK.ProfanityOption.Raw,
+		masked: SpeechSDK.ProfanityOption.Masked,
+		removed: SpeechSDK.ProfanityOption.Removed
+	};
+	config.setProfanity(profanityMap[filter] ?? SpeechSDK.ProfanityOption.Masked);
 }
 
 function createAudioConfig(deviceId: string): SpeechSDK.AudioConfig {
@@ -135,6 +145,8 @@ export async function startRecognition(): Promise<void> {
 
 	const useTranslation = needsTranslation();
 
+	const useAutoDetect = s.sourceLanguage === 'auto';
+
 	try {
 		const audioConfig = createAudioConfig(s.audioDeviceId);
 
@@ -143,10 +155,19 @@ export async function startRecognition(): Promise<void> {
 				s.azureKey,
 				s.azureRegion
 			);
-			translationConfig.speechRecognitionLanguage = s.sourceLanguage;
+			if (!useAutoDetect) {
+				translationConfig.speechRecognitionLanguage = s.sourceLanguage;
+			}
 			translationConfig.addTargetLanguage(getTargetLanguageBcp47(s.targetLanguage));
+			applyProfanityFilter(translationConfig, s.profanityFilter);
 
-			const rec = new SpeechSDK.TranslationRecognizer(translationConfig, audioConfig);
+			let rec: SpeechSDK.TranslationRecognizer;
+			if (useAutoDetect) {
+				const autoDetectConfig = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(s.autoDetectLanguages);
+				rec = new SpeechSDK.TranslationRecognizer(translationConfig, autoDetectConfig, audioConfig);
+			} else {
+				rec = new SpeechSDK.TranslationRecognizer(translationConfig, audioConfig);
+			}
 			loadPhrases(rec, s.phrases);
 			wireEvents(rec, true);
 			recognizer = rec;
@@ -155,9 +176,18 @@ export async function startRecognition(): Promise<void> {
 				s.azureKey,
 				s.azureRegion
 			);
-			speechConfig.speechRecognitionLanguage = s.sourceLanguage;
+			if (!useAutoDetect) {
+				speechConfig.speechRecognitionLanguage = s.sourceLanguage;
+			}
+			applyProfanityFilter(speechConfig, s.profanityFilter);
 
-			const rec = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+			let rec: SpeechSDK.SpeechRecognizer;
+			if (useAutoDetect) {
+				const autoDetectConfig = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(s.autoDetectLanguages);
+				rec = new SpeechSDK.SpeechRecognizer(speechConfig, autoDetectConfig, audioConfig);
+			} else {
+				rec = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+			}
 			loadPhrases(rec, s.phrases);
 			wireEvents(rec, false);
 			recognizer = rec;

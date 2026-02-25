@@ -1,5 +1,7 @@
 import { writable } from 'svelte/store';
 
+export type AnimationType = 'none' | 'fade' | 'slide';
+
 export interface SubtitleStyle {
 	fontFamily: string;
 	fontSize: number;
@@ -10,6 +12,7 @@ export interface SubtitleStyle {
 	position: 'top' | 'center' | 'bottom';
 	maxLines: number;
 	textAlign: 'left' | 'center' | 'right';
+	animation: AnimationType;
 }
 
 export const defaultStyle: SubtitleStyle = {
@@ -21,7 +24,8 @@ export const defaultStyle: SubtitleStyle = {
 	outlineColor: '#000000',
 	position: 'bottom',
 	maxLines: 2,
-	textAlign: 'center'
+	textAlign: 'center',
+	animation: 'fade'
 };
 
 function createStyleStore() {

@@ -1,15 +1,15 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import { settings } from '$lib/stores/settings';
 	import { subtitles, type ConnectionStatus } from '$lib/stores/subtitles';
-	import { startRecognition, stopRecognition } from '$lib/services/speech';
-	import { createAudioLevelMonitor, type AudioLevelMonitor, getAudioInputDevices, watchDeviceChanges } from '$lib/services/audio';
-	import { enableAutoReconnect, disableAutoReconnect } from '$lib/services/reconnection';
-	import { requestWakeLock, releaseWakeLock } from '$lib/services/wakelock';
-	import { startSession, getEntryCount, exportAsText, exportAsSrt, downloadFile } from '$lib/services/transcript';
+	import { startSession, stopSession, getSessionTranscriptCount } from '$lib/services/session';
+	import { getEntryCount, exportAsText, exportAsSrt, downloadFile } from '$lib/services/transcript';
 	import { startDemo, stopDemo, isDemoRunning } from '$lib/services/demo';
+	import { buildShareUrl } from '$lib/utils/url-params';
 	import AudioDeviceSelector from './AudioDeviceSelector.svelte';
 	import StyleControls from './StyleControls.svelte';
 	import PhraseListEditor from './PhraseListEditor.svelte';
+	import PresetManager from './PresetManager.svelte';
 	import SubtitleDisplay from './SubtitleDisplay.svelte';
 
 	interface Props {
@@ -21,11 +21,9 @@
 	let running = $derived(
 		['connecting', 'connected', 'reconnecting'].includes($subtitles.connectionStatus)
 	);
-	let audioMonitor = $state<AudioLevelMonitor | null>(null);
-	let audioLevelInterval: ReturnType<typeof setInterval> | null = null;
-	let unwatchDevices: (() => void) | null = null;
 
 	const sourceLanguages = [
+		{ value: 'auto', label: 'Auto-detect' },
 		{ value: 'en-US', label: 'English (US)' },
 		{ value: 'en-GB', label: 'English (UK)' },
 		{ value: 'nl-NL', label: 'Dutch (Netherlands)' },
@@ -33,6 +31,27 @@
 		{ value: 'fr-FR', label: 'French' },
 		{ value: 'es-ES', label: 'Spanish' }
 	];
+
+	const autoDetectCandidates = [
+		{ value: 'en-US', label: 'English (US)' },
+		{ value: 'en-GB', label: 'English (UK)' },
+		{ value: 'nl-NL', label: 'Dutch' },
+		{ value: 'de-DE', label: 'German' },
+		{ value: 'fr-FR', label: 'French' },
+		{ value: 'es-ES', label: 'Spanish' }
+	];
+
+	function toggleAutoDetectLang(lang: string) {
+		settings.update((s) => {
+			const current = s.autoDetectLanguages;
+			const idx = current.indexOf(lang);
+			if (idx >= 0) {
+				if (current.length <= 2) return s; // minimum 2
+				return { ...s, autoDetectLanguages: current.filter((l) => l !== lang) };
+			}
+			return { ...s, autoDetectLanguages: [...current, lang] };
+		});
+	}
 
 	const targetLanguages = [
 		{ value: '', label: 'None (same language)' },
@@ -42,22 +61,6 @@
 		{ value: 'fr', label: 'French' },
 		{ value: 'es', label: 'Spanish' }
 	];
-
-	function handleDeviceDisconnect() {
-		subtitles.setStatus('error', 'Audio device disconnected. Please reconnect and restart.');
-		handleStop();
-	}
-
-	async function handleDeviceChange() {
-		if (!running) return;
-		const deviceId = $settings.audioDeviceId;
-		if (!deviceId) return; // using default device
-		const devices = await getAudioInputDevices();
-		const stillPresent = devices.some((d) => d.deviceId === deviceId);
-		if (!stillPresent) {
-			handleDeviceDisconnect();
-		}
-	}
 
 	let showExportMenu = $state(false);
 	let transcriptCount = $state(0);
@@ -81,6 +84,16 @@
 		showExportMenu = false;
 	}
 
+	let urlCopied = $state(false);
+
+	async function handleCopyUrl(event: MouseEvent) {
+		const includeKey = event.shiftKey;
+		const url = buildShareUrl(includeKey);
+		await navigator.clipboard.writeText(url);
+		urlCopied = true;
+		setTimeout(() => { urlCopied = false; }, 2000);
+	}
+
 	function handleDemo() {
 		if (demoRunning) {
 			stopDemo();
@@ -92,26 +105,7 @@
 	}
 
 	async function handleStart() {
-		startSession();
-		enableAutoReconnect();
-		try {
-			// Start audio level monitor with track-ended detection
-			audioMonitor = await createAudioLevelMonitor(
-				$settings.audioDeviceId || undefined,
-				handleDeviceDisconnect
-			);
-			audioLevelInterval = setInterval(() => {
-				if (audioMonitor) {
-					subtitles.setAudioLevel(audioMonitor.getLevel());
-				}
-			}, 100);
-		} catch {
-			// Audio monitor is optional
-		}
-		// Watch for device list changes (USB unplug)
-		unwatchDevices = watchDeviceChanges(handleDeviceChange);
-		await requestWakeLock();
-		await startRecognition();
+		await startSession($settings.audioDeviceId);
 	}
 
 	async function handleStop() {
@@ -120,28 +114,36 @@
 			demoRunning = false;
 			return;
 		}
-		disableAutoReconnect();
-		releaseWakeLock();
-		await stopRecognition();
-		if (unwatchDevices) {
-			unwatchDevices();
-			unwatchDevices = null;
-		}
-		if (audioLevelInterval) {
-			clearInterval(audioLevelInterval);
-			audioLevelInterval = null;
-		}
-		if (audioMonitor) {
-			audioMonitor.stop();
-			audioMonitor = null;
-		}
-		subtitles.setAudioLevel(0);
+		await stopSession();
 		updateTranscriptCount();
 	}
 
 	function handleClear() {
 		subtitles.clear();
 	}
+
+	// Session timer
+	let now = $state(Date.now());
+	let timerInterval: ReturnType<typeof setInterval> | null = null;
+
+	onMount(() => {
+		timerInterval = setInterval(() => { now = Date.now(); }, 1000);
+	});
+
+	onDestroy(() => {
+		if (timerInterval) clearInterval(timerInterval);
+	});
+
+	let sessionElapsed = $derived.by(() => {
+		const start = $subtitles.sessionStartTime;
+		if (!start || !running) return '';
+		const elapsed = Math.max(0, now - start);
+		const totalSeconds = Math.floor(elapsed / 1000);
+		const hours = Math.floor(totalSeconds / 3600);
+		const minutes = Math.floor((totalSeconds % 3600) / 60);
+		const seconds = totalSeconds % 60;
+		return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+	});
 
 	let statusColor = $derived.by(() => {
 		const status: ConnectionStatus = $subtitles.connectionStatus;
@@ -180,11 +182,23 @@
 					<h1 class="text-lg font-bold text-white">LiveSubs</h1>
 					<p class="text-xs" style:color="var(--el-muted)">Real-time Subtitling</p>
 				</div>
+				<button
+					onclick={handleCopyUrl}
+					class="ml-auto text-xs px-2 py-1 rounded hover:brightness-110 transition-all"
+					style:background-color="var(--el-bg-light)"
+					style:color="var(--el-muted)"
+					title="Copy settings URL (Shift+click to include key)"
+				>
+					{urlCopied ? 'Copied!' : 'Copy URL'}
+				</button>
 			</div>
 		</div>
 
 		<!-- Config sections -->
 		<div class="flex-1 p-4 space-y-5 overflow-y-auto">
+			<!-- Presets -->
+			<PresetManager disabled={running} />
+
 			<!-- Azure Settings -->
 			<div class="space-y-2">
 				<h3 class="text-sm font-semibold text-white">Azure Speech</h3>
@@ -231,6 +245,25 @@
 					</select>
 					</label>
 				</div>
+				{#if $settings.sourceLanguage === 'auto'}
+					<div class="rounded p-2 border border-white/10" style:background-color="var(--el-bg-light)">
+						<span class="block text-xs mb-1.5" style:color="var(--el-muted)">Candidate Languages (min 2)</span>
+						<div class="grid grid-cols-2 gap-1">
+							{#each autoDetectCandidates as lang}
+								<label class="flex items-center gap-1.5 text-xs cursor-pointer" style:color="var(--el-muted)">
+									<input
+										type="checkbox"
+										checked={$settings.autoDetectLanguages.includes(lang.value)}
+										onchange={() => toggleAutoDetectLang(lang.value)}
+										disabled={running}
+										class="accent-[var(--el-accent)] disabled:opacity-50"
+									/>
+									{lang.label}
+								</label>
+							{/each}
+						</div>
+					</div>
+				{/if}
 				<div>
 					<label class="block text-xs mb-1" style:color="var(--el-muted)">Translate To
 					<select
@@ -242,6 +275,20 @@
 						{#each targetLanguages as lang}
 							<option value={lang.value}>{lang.label}</option>
 						{/each}
+					</select>
+					</label>
+				</div>
+				<div>
+					<label class="block text-xs mb-1" style:color="var(--el-muted)">Profanity Filter
+					<select
+						bind:value={$settings.profanityFilter}
+						disabled={running}
+						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)] disabled:opacity-50"
+						style:background-color="var(--el-bg-light)"
+					>
+						<option value="masked">Masked (***)</option>
+						<option value="removed">Removed</option>
+						<option value="raw">Raw (no filter)</option>
 					</select>
 					</label>
 				</div>
@@ -354,6 +401,10 @@
 				></span>
 				<span class="text-sm font-medium" style:color={statusColor}>{statusLabel}</span>
 			</div>
+
+			{#if sessionElapsed}
+				<span class="text-sm font-mono" style:color="var(--el-muted)">{sessionElapsed}</span>
+			{/if}
 
 			{#if $subtitles.errorMessage}
 				<span class="text-sm text-red-400 truncate">{$subtitles.errorMessage}</span>

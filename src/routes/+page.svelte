@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { settings } from '$lib/stores/settings';
+	import { subtitles } from '$lib/stores/subtitles';
 	import { defaultPhrases } from '$lib/utils/phrases';
 	import { resumeActiveMonitor } from '$lib/services/audio';
+	import { startSession, stopSession } from '$lib/services/session';
+	import { applyUrlParams } from '$lib/utils/url-params';
 	import ConfigPanel from '$lib/components/ConfigPanel.svelte';
 	import SubtitleDisplay from '$lib/components/SubtitleDisplay.svelte';
 
@@ -25,15 +28,34 @@
 		}
 	}
 
+	let running = $derived(
+		['connecting', 'connected', 'reconnecting'].includes($subtitles.connectionStatus)
+	);
+
 	function handleKeydown(event: KeyboardEvent) {
 		// Ignore when typing in inputs
 		const target = event.target as HTMLElement;
 		if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
 			return;
 		}
-		if (event.key === 'f' || event.key === 'F') {
-			event.preventDefault();
-			toggleFullscreen();
+		switch (event.key) {
+			case 'f':
+			case 'F':
+				event.preventDefault();
+				toggleFullscreen();
+				break;
+			case ' ':
+				event.preventDefault();
+				if (running) {
+					stopSession();
+				} else {
+					startSession($settings.audioDeviceId);
+				}
+				break;
+			case 'c':
+			case 'C':
+				subtitles.clear();
+				break;
 		}
 	}
 
@@ -48,6 +70,9 @@
 	}
 
 	onMount(() => {
+		// Apply URL parameters before other initialization
+		applyUrlParams();
+
 		// Load default phrases on first visit
 		if ($settings.phrases.length === 0) {
 			$settings.phrases = [...defaultPhrases];

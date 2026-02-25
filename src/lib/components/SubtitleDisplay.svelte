@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fade, fly } from 'svelte/transition';
 	import { subtitles } from '$lib/stores/subtitles';
 	import { style } from '$lib/stores/style';
 	import StatusIndicator from './StatusIndicator.svelte';
@@ -8,6 +9,14 @@
 	}
 
 	let { preview = false }: Props = $props();
+
+	let animationParams = $derived.by(() => {
+		switch ($style.animation) {
+			case 'fade': return { type: 'fade' as const, params: { duration: 200 } };
+			case 'slide': return { type: 'fly' as const, params: { y: 20, duration: 250 } };
+			default: return null;
+		}
+	});
 
 	let visibleLines = $derived.by(() => {
 		const maxLines = $style.maxLines;
@@ -52,7 +61,13 @@
 >
 	<StatusIndicator />
 	{#each visibleLines as line (line.id)}
-		<div class="subtitle-line">{line.text}</div>
+		{#if animationParams?.type === 'fade'}
+			<div class="subtitle-line" in:fade={animationParams.params}>{line.text}</div>
+		{:else if animationParams?.type === 'fly'}
+			<div class="subtitle-line" in:fly={animationParams.params}>{line.text}</div>
+		{:else}
+			<div class="subtitle-line">{line.text}</div>
+		{/if}
 	{/each}
 	{#if $subtitles.partialText}
 		<div class="subtitle-line partial" style:opacity="0.6">
