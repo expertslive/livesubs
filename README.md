@@ -248,6 +248,7 @@ flowchart TD
 | Styling | Tailwind CSS v4 |
 | Speech-to-text | Azure Cognitive Services Speech SDK |
 | Translation | Azure Speech Translation (same SDK) |
+| Testing | Vitest + @testing-library/svelte |
 | Architecture | Browser-direct — no backend server |
 | Hosting | Azure Static Web Apps |
 | State | Svelte writable stores + localStorage |
@@ -270,10 +271,13 @@ src/
 │   │   └── QuickMessages.svelte      # Quick message pills with edit mode
 │   ├── stores/
 │   │   ├── settings.ts               # Azure key, region, languages, device, phrases, profanity, alerts
+│   │   ├── settings.test.ts          # Settings store tests (defaults, persistence, merging)
 │   │   ├── subtitles.ts              # Lines buffer, partial text, status, audio level, timer
+│   │   ├── subtitles.test.ts         # Subtitles store tests (20 tests)
 │   │   ├── style.ts                  # Font, size, color, outline, position, maxLines, animation
 │   │   ├── presets.ts                # Named configuration presets (localStorage-persisted)
-│   │   └── quickMessages.ts          # Quick cue card messages (localStorage-persisted)
+│   │   ├── quickMessages.ts          # Quick cue card messages (localStorage-persisted)
+│   │   └── quickMessages.test.ts     # Quick messages store tests (CRUD, persistence)
 │   ├── services/
 │   │   ├── session.ts                # Session lifecycle (start/stop orchestration)
 │   │   ├── speech.ts                 # Azure Speech SDK wrapper + auto-detect + profanity
@@ -281,18 +285,25 @@ src/
 │   │   ├── broadcast.ts              # BroadcastChannel sender (throttled subtitle + style sync)
 │   │   ├── broadcast-receiver.ts     # BroadcastChannel listener for overlay tabs
 │   │   ├── reconnection.ts           # Auto-reconnect with exponential backoff
+│   │   ├── reconnection.test.ts      # Reconnection tests (backoff, retries, cancellation)
 │   │   ├── transcript.ts             # Session recording + TXT/SRT export
+│   │   ├── transcript.test.ts        # Transcript tests (text/SRT export format)
 │   │   ├── wakelock.ts               # Screen Wake Lock API wrapper
 │   │   └── demo.ts                   # Demo mode with canned conference text
 │   └── utils/
 │       ├── phrases.ts                # ~90 default IT/cloud/Azure terms
-│       └── url-params.ts             # URL query parameter read/write for shareable URLs
+│       ├── phrases.test.ts           # Phrase list validation tests
+│       ├── url-params.ts             # URL query parameter read/write for shareable URLs
+│       └── url-params.test.ts        # URL params tests (build, apply, key stripping)
 ├── routes/
 │   ├── +page.svelte                  # Operator page: config ↔ fullscreen toggle + shortcuts
+│   ├── +error.svelte                 # Branded error page with reload/home actions
 │   ├── overlay/
 │   │   └── +page.svelte              # Overlay output (receiver or standalone mode)
 │   ├── +layout.svelte
 │   └── +layout.ts                    # SSR disabled, prerender enabled
+├── test/
+│   └── setup.ts                      # Vitest setup (localStorage mock, jest-dom matchers)
 ├── app.css                           # Tailwind v4 + Experts Live CSS variables
 └── app.html
 ```
@@ -593,6 +604,89 @@ Features designed for reliability during multi-hour live conferences:
 - **Partial text overflow fix** — when partial (in-progress) text is present, one line slot is reserved for it so the display never exceeds the configured `maxLines`.
 - **Derived connection state** — the Start/Stop button state is derived directly from the subtitle store's `connectionStatus`, eliminating UI desync if recognition fails to start.
 - **BroadcastChannel throttling** — partial-text-only updates to overlay tabs are throttled to max 5/sec (200ms), while final lines, status changes, and style changes are sent immediately. A 3-second ping heartbeat lets receivers detect operator disconnection.
+- **Error boundaries** — a branded SvelteKit error page (`+error.svelte`) catches unhandled route errors with reload/home actions. Clipboard operations are wrapped in try/catch to prevent unhandled rejections when clipboard access is denied. The overlay `init()` is wrapped in try/catch so OBS browser sources stay in "waiting" mode rather than showing a white screen on init failure.
+- **Test suite** — 60 unit tests across 7 test files covering all stores, services, and utilities. See [Testing](#testing).
+
+## Accessibility
+
+The app includes accessibility features for screen readers and assistive technology:
+
+```mermaid
+flowchart LR
+    subgraph Landmarks
+        A["aside\n(Configuration)"] --- B["main\n(Subtitle output)"]
+    end
+
+    subgraph Live Regions
+        C["aria-live=polite\n(SubtitleDisplay)"]
+        D["role=status\n(StatusIndicator)"]
+        E["role=status\n(Connection bar)"]
+        F["role=alert\n(Silence warning)"]
+    end
+
+    subgraph Labels
+        G[aria-label on\nall icon buttons]
+    end
+```
+
+- **Live subtitles** — the subtitle display area is an `aria-live="polite"` region, so screen readers announce new subtitle lines as they appear
+- **Status indicator** — the connection status dot has `role="status"` with a descriptive `aria-label` ("Receiving speech", "No speech detected", "Connection error", "Connecting")
+- **Semantic landmarks** — the sidebar uses `<aside aria-label="Configuration">` with a `<header>`, and the main content area uses `<main aria-label="Subtitle output">`
+- **Connection status** — the status bar indicator has `role="status"` so connection changes are announced; the decorative color dot has `aria-hidden="true"`
+- **Button labels** — all buttons with icon-only or ambiguous text have descriptive `aria-label` attributes (Copy URL, Demo, Clear, Export, Fullscreen, History, Overlay buttons, Quick Messages add/remove)
+- **Silence alert** — a visually-hidden `role="alert"` span announces silence detection to screen readers ("Silence detected for X seconds")
+
+## Testing
+
+The project uses [Vitest](https://vitest.dev/) with happy-dom for unit testing.
+
+### Running Tests
+
+```sh
+npm test          # Run all tests once
+npm run test:watch # Run in watch mode
+```
+
+### Test Coverage
+
+```mermaid
+graph TD
+    subgraph "Stores (36 tests)"
+        ST[subtitles.test.ts\n20 tests]
+        SE[settings.test.ts\n5 tests]
+        QM[quickMessages.test.ts\n11 tests]
+    end
+
+    subgraph "Services (13 tests)"
+        TR[transcript.test.ts\n7 tests]
+        RC[reconnection.test.ts\n6 tests]
+    end
+
+    subgraph "Utils (11 tests)"
+        PH[phrases.test.ts\n4 tests]
+        UP[url-params.test.ts\n7 tests]
+    end
+
+    style ST fill:#22C55E,color:#fff
+    style SE fill:#22C55E,color:#fff
+    style QM fill:#22C55E,color:#fff
+    style TR fill:#22C55E,color:#fff
+    style RC fill:#22C55E,color:#fff
+    style PH fill:#22C55E,color:#fff
+    style UP fill:#22C55E,color:#fff
+```
+
+| Test File | Tests | What It Covers |
+|-----------|-------|----------------|
+| `subtitles.test.ts` | 20 | addFinalLine, setPartial, setStatus, updateLine, clear, reset, setBroadcastState, buffer trimming |
+| `quickMessages.test.ts` | 11 | CRUD operations, reset, localStorage persistence, counter restoration from stored IDs |
+| `transcript.test.ts` | 7 | Session lifecycle, entry CRUD, TXT export format (`[HH:MM:SS] text`), SRT export format |
+| `url-params.test.ts` | 7 | buildShareUrl, buildOverlayUrl, applyUrlParams, key inclusion/exclusion, URL key stripping |
+| `reconnection.test.ts` | 6 | Enable/disable, exponential backoff timing, max retry limit, timeout cancellation |
+| `settings.test.ts` | 5 | Defaults, persistence, settings merging with new fields, corrupt localStorage handling |
+| `phrases.test.ts` | 4 | Array validation, minimum term count, key term presence, no empty strings |
+
+Tests use `vi.useFakeTimers()` for deterministic timestamps, `vi.resetModules()` for fresh store instances, and `vi.mock()` to stub the Azure Speech SDK in reconnection tests.
 
 ## Deployment
 

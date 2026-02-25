@@ -57,6 +57,7 @@
 				<button
 					onclick={() => quickMessages.remove(msg.id)}
 					class="text-red-400 hover:text-red-300"
+					aria-label="Remove message"
 				>&times;</button>
 			</span>
 		{:else}
@@ -85,6 +86,7 @@
 				class="rounded px-2 py-1 text-xs font-medium hover:brightness-110 transition-all"
 				style:background-color="var(--el-accent)"
 				style:color="white"
+				aria-label="Add quick message"
 			>+</button>
 		</form>
 	{/if}

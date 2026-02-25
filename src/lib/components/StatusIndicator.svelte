@@ -26,11 +26,23 @@
 		if ($subtitles.lastActivityTimestamp === 0 || elapsed > SILENCE_THRESHOLD) return 'silent';
 		return 'active';
 	});
+
+	let statusLabel = $derived.by(() => {
+		switch (status) {
+			case 'active': return 'Receiving speech';
+			case 'silent': return 'No speech detected';
+			case 'error': return 'Connection error';
+			case 'connecting': return 'Connecting';
+			default: return '';
+		}
+	});
 </script>
 
 {#if status !== 'hidden'}
 	<div
 		class="status-dot"
+		role="status"
+		aria-label={statusLabel}
 		class:active={status === 'active'}
 		class:silent={status === 'silent'}
 		class:error={status === 'error'}

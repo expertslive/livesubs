@@ -51,6 +51,10 @@
 
 <div
 	class="subtitle-container"
+	role="region"
+	aria-label="Live subtitles"
+	aria-live="polite"
+	aria-atomic="false"
 	style:font-family={$style.fontFamily}
 	style:font-size="{$style.fontSize * scaleFactor}px"
 	style:color={$style.textColor}

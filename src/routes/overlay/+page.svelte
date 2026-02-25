@@ -44,19 +44,24 @@
 		bgColor = parseBgParam();
 
 		async function init() {
-			const received = await startReceiving();
-			if (received) {
-				mode = 'receiver';
-			} else {
-				// No broadcast source — try standalone mode
-				applyUrlParams();
-				const hasKey = !!$settings.azureKey;
-				const hasRegion = !!$settings.azureRegion;
-				if (hasKey && hasRegion) {
-					mode = 'standalone';
-					await startSession();
+			try {
+				const received = await startReceiving();
+				if (received) {
+					mode = 'receiver';
+				} else {
+					// No broadcast source — try standalone mode
+					applyUrlParams();
+					const hasKey = !!$settings.azureKey;
+					const hasRegion = !!$settings.azureRegion;
+					if (hasKey && hasRegion) {
+						mode = 'standalone';
+						await startSession();
+					}
+					// else: stays in 'waiting' mode
 				}
-				// else: stays in 'waiting' mode
+			} catch (e) {
+				console.error('Overlay init failed:', e);
+				// Stay in 'waiting' mode — keeps the overlay DOM intact for OBS
 			}
 		}
 		init();

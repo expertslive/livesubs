@@ -158,11 +158,15 @@
 	let urlCopied = $state(false);
 
 	async function handleCopyUrl(event: MouseEvent) {
-		const includeKey = event.shiftKey;
-		const url = buildShareUrl(includeKey);
-		await navigator.clipboard.writeText(url);
-		urlCopied = true;
-		setTimeout(() => { urlCopied = false; }, 2000);
+		try {
+			const includeKey = event.shiftKey;
+			const url = buildShareUrl(includeKey);
+			await navigator.clipboard.writeText(url);
+			urlCopied = true;
+			setTimeout(() => { urlCopied = false; }, 2000);
+		} catch (e) {
+			console.error('Failed to copy URL to clipboard:', e);
+		}
 	}
 
 	let overlayUrlCopied = $state(false);
@@ -173,11 +177,15 @@
 	}
 
 	async function handleCopyOverlayUrl(event: MouseEvent) {
-		const includeKey = event.shiftKey;
-		const url = buildOverlayUrl(includeKey);
-		await navigator.clipboard.writeText(url);
-		overlayUrlCopied = true;
-		setTimeout(() => { overlayUrlCopied = false; }, 2000);
+		try {
+			const includeKey = event.shiftKey;
+			const url = buildOverlayUrl(includeKey);
+			await navigator.clipboard.writeText(url);
+			overlayUrlCopied = true;
+			setTimeout(() => { overlayUrlCopied = false; }, 2000);
+		} catch (e) {
+			console.error('Failed to copy overlay URL to clipboard:', e);
+		}
 	}
 
 	let overlayUrl = $derived(buildOverlayUrl(false));
@@ -260,12 +268,13 @@
 
 <div class="h-screen flex" style:background="linear-gradient(135deg, var(--el-navy), var(--el-bg))">
 	<!-- Sidebar -->
-	<div
+	<aside
+		aria-label="Configuration"
 		class="w-80 flex flex-col overflow-y-auto shrink-0"
 		style:background-color="var(--el-navy)"
 	>
 		<!-- Header -->
-		<div class="p-4 border-b border-white/10">
+		<header class="p-4 border-b border-white/10">
 			<div class="flex items-center gap-3">
 				<img src="/logo.png" alt="Experts Live" class="h-10" />
 				<div>
@@ -278,11 +287,12 @@
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Copy settings URL (Shift+click to include key)"
+					aria-label="Copy settings URL"
 				>
 					{urlCopied ? 'Copied!' : 'Copy URL'}
 				</button>
 			</div>
-		</div>
+		</header>
 
 		<!-- Config sections -->
 		<div class="flex-1 p-4 space-y-5 overflow-y-auto">
@@ -446,6 +456,7 @@
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Demo mode with sample text"
+					aria-label={demoRunning ? 'Stop demo mode' : 'Start demo mode'}
 				>
 					{demoRunning ? 'Stop Demo' : 'Demo'}
 				</button>
@@ -457,6 +468,7 @@
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Clear subtitles"
+					aria-label="Clear subtitles"
 				>
 					Clear
 				</button>
@@ -467,6 +479,7 @@
 						style:background-color="var(--el-bg-light)"
 						style:color="var(--el-muted)"
 						title="Export transcript"
+						aria-label="Export transcript"
 					>
 						Export{transcriptCount > 0 ? ` (${transcriptCount})` : ''}
 					</button>
@@ -495,23 +508,25 @@
 					class="ml-auto rounded px-3 py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
 					style:background-color="var(--el-blue)"
 					title="Fullscreen (F)"
+					aria-label="Toggle fullscreen mode"
 				>
 					Fullscreen
 				</button>
 			</div>
 		</div>
-	</div>
+	</aside>
 
 	<!-- Main area -->
-	<div class="flex-1 flex flex-col">
+	<main aria-label="Subtitle output" class="flex-1 flex flex-col">
 		<!-- Status bar -->
 		<div
 			class="flex items-center gap-3 px-4 py-2 border-b border-white/10"
 			style:background-color="var(--el-bg)"
 		>
-			<div class="flex items-center gap-2">
+			<div class="flex items-center gap-2" role="status">
 				<span
 					class="w-2.5 h-2.5 rounded-full"
+					aria-hidden="true"
 					style:background-color={statusColor}
 				></span>
 				<span class="text-sm font-medium" style:color={statusColor}>{statusLabel}</span>
@@ -541,6 +556,7 @@
 					<span class="text-xs font-semibold px-2 py-0.5 rounded-full animate-pulse" style="background-color: rgba(245, 158, 11, 0.2); color: #F59E0B;">
 						Silence: {silenceSeconds}s
 					</span>
+					<span class="sr-only" role="alert">Silence detected for {silenceSeconds} seconds</span>
 				{/if}
 			{/if}
 
@@ -551,6 +567,7 @@
 					style:background-color={showHistory ? 'var(--el-blue)' : 'var(--el-bg-light)'}
 					style:color={showHistory ? 'white' : 'var(--el-muted)'}
 					title="Toggle subtitle history"
+					aria-label={showHistory ? 'Hide subtitle history' : 'Show subtitle history'}
 				>
 					History
 				</button>
@@ -560,6 +577,7 @@
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Open overlay in new window"
+					aria-label="Open overlay in new window"
 				>
 					Open Overlay
 				</button>
@@ -569,6 +587,7 @@
 					style:background-color="var(--el-bg-light)"
 					style:color="var(--el-muted)"
 					title="Copy overlay URL for OBS (Shift+click to include Azure key)"
+					aria-label="Copy overlay URL"
 				>
 					{overlayUrlCopied ? 'Copied!' : 'Copy Overlay URL'}
 				</button>
@@ -619,5 +638,5 @@
 				<SubtitleDisplay preview={true} />
 			</div>
 		{/if}
-	</div>
+	</main>
 </div>

@@ -73,10 +73,14 @@
 	});
 
 	async function handleCopyAll() {
-		const text = $subtitles.lines.map((l) => l.text).join('\n');
-		await navigator.clipboard.writeText(text);
-		copied = true;
-		setTimeout(() => { copied = false; }, 2000);
+		try {
+			const text = $subtitles.lines.map((l) => l.text).join('\n');
+			await navigator.clipboard.writeText(text);
+			copied = true;
+			setTimeout(() => { copied = false; }, 2000);
+		} catch (e) {
+			console.error('Failed to copy to clipboard:', e);
+		}
 	}
 </script>
 
