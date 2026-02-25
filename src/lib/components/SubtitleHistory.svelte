@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { subtitles } from '$lib/stores/subtitles';
+	import { updateTranscriptEntry } from '$lib/services/transcript';
 	import { onMount } from 'svelte';
 
 	interface Props {
@@ -11,6 +12,40 @@
 	let scrollContainer: HTMLDivElement | undefined = $state();
 	let userScrolled = $state(false);
 	let copied = $state(false);
+	let editingLineId = $state<string | null>(null);
+	let editLineText = $state('');
+
+	function startLineEdit(id: string, text: string) {
+		editingLineId = id;
+		editLineText = text;
+	}
+
+	function saveLineEdit() {
+		if (editingLineId && editLineText.trim()) {
+			const oldLine = $subtitles.lines.find((l) => l.id === editingLineId);
+			if (oldLine && oldLine.text !== editLineText.trim()) {
+				updateTranscriptEntry(oldLine.text, editLineText.trim());
+				subtitles.updateLine(editingLineId, editLineText.trim());
+			}
+		}
+		editingLineId = null;
+		editLineText = '';
+	}
+
+	function cancelLineEdit() {
+		editingLineId = null;
+		editLineText = '';
+	}
+
+	function handleEditKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			saveLineEdit();
+		}
+		if (e.key === 'Escape') {
+			cancelLineEdit();
+		}
+	}
 
 	function formatTime(timestamp: number): string {
 		if (!sessionStartTime) return '';
@@ -75,7 +110,25 @@
 					<span class="shrink-0 font-mono text-xs leading-5" style:color="var(--el-muted)">
 						{formatTime(line.timestamp)}
 					</span>
-					<span class="text-white leading-5">{line.text}</span>
+					{#if editingLineId === line.id}
+						<input
+							type="text"
+							bind:value={editLineText}
+							onkeydown={handleEditKeydown}
+							onblur={saveLineEdit}
+							class="flex-1 rounded px-1 py-0 text-sm text-white border border-[var(--el-accent)] focus:outline-none leading-5"
+							style:background-color="var(--el-bg-light)"
+							autofocus
+						/>
+					{:else}
+						<span
+							role="button"
+							tabindex="0"
+							onclick={() => startLineEdit(line.id, line.text)}
+							onkeydown={(e) => { if (e.key === 'Enter') startLineEdit(line.id, line.text); }}
+							class="text-white leading-5 cursor-pointer hover:underline hover:decoration-white/30 hover:decoration-dotted"
+						>{line.text}</span>
+					{/if}
 				</div>
 			{/each}
 		{/if}

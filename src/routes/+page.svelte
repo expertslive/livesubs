@@ -57,6 +57,11 @@
 			case 'C':
 				subtitles.clear();
 				break;
+			case 't':
+			case 'T':
+				event.preventDefault();
+				window.dispatchEvent(new CustomEvent('livesubs:focus-manual-input'));
+				break;
 		}
 	}
 

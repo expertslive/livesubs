@@ -2,7 +2,7 @@
 
 Real-time subtitling app for **Experts Live** IT conferences. Captures audio from a microphone or virtual audio device, transcribes speech using Azure Cognitive Services, optionally translates between languages, and displays configurable subtitles on a chroma-key green screen or transparent overlay.
 
-Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, session transcript export, OBS browser source integration, multi-output sync via BroadcastChannel, and operator-friendly features like keyboard shortcuts, shareable config URLs, QR codes, subtitle history, and settings presets.
+Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, session transcript export, OBS browser source integration, multi-output sync via BroadcastChannel, operator live controls (manual text injection, quick messages, inline line correction, silence detection with audio alerts), and operator-friendly features like keyboard shortcuts, shareable config URLs, QR codes, subtitle history, and settings presets.
 
 ![Experts Live](static/logo.png)
 
@@ -16,6 +16,8 @@ graph LR
     B --> E[Config Panel + Preview]
     B -->|BroadcastChannel| OV1[/overlay tab\nReceiver mode]
     B -->|BroadcastChannel| OV2[/overlay tab\nConfidence monitor]
+
+    OP[Operator Controls] -->|Manual text\nQuick messages\nLine corrections| B
 
     OV3[/overlay?key=...&region=...\nOBS Browser Source] -->|Own WebSocket| C
 
@@ -79,6 +81,7 @@ flowchart LR
         S2[style store]
         S3[subtitles store]
         S4[presets store]
+        S5[quickMessages store]
     end
 
     subgraph Services
@@ -113,6 +116,10 @@ flowchart LR
     S3 --> SD
     DM -->|simulated text| S3
 
+    OC[Operator Controls] -->|addFinalLine\nupdateLine| S3
+    OC -->|addTranscriptEntry\nupdateTranscriptEntry| TR
+    S5 -->|quick message text| OC
+
     S3 -->|subscribe| BC
     S2 -->|subscribe| BC
     BC -->|BroadcastChannel| BR
@@ -127,6 +134,7 @@ flowchart LR
     S1 -.->|persisted| LS[(localStorage)]
     S2 -.->|persisted| LS
     S4 -.->|persisted| LS
+    S5 -.->|persisted| LS
     TR -.->|export| DL[TXT / SRT download]
 ```
 
@@ -190,6 +198,48 @@ flowchart TD
     N --> O[Stop audio monitor]
 ```
 
+### Operator Intervention Flow
+
+Manual text, quick messages, and line corrections all go through the same data path as speech recognition — modifying the `lines` array reference in the subtitles store. This means BroadcastChannel subscribers automatically detect and propagate changes to overlay tabs with no extra logic.
+
+```mermaid
+flowchart TD
+    subgraph Operator Actions
+        MT[Manual text input]
+        QM[Quick message pill]
+        LC[Line correction in History]
+    end
+
+    MT -->|addFinalLine| S3[subtitles store]
+    MT -->|addTranscriptEntry| TR[transcript.ts]
+    QM -->|addFinalLine| S3
+    QM -->|addTranscriptEntry| TR
+    LC -->|updateLine| S3
+    LC -->|updateTranscriptEntry| TR
+
+    S3 -->|new lines ref detected| BC[broadcast.ts]
+    BC -->|BroadcastChannel| OV[Overlay tabs]
+    TR -->|corrected entries| EX[TXT / SRT export]
+```
+
+### Silence Detection Flow
+
+```mermaid
+flowchart TD
+    A[Timer ticks every 1s] --> B{running AND\nnow - lastActivity\n≥ threshold?}
+    B -->|No| C[Clear warning\nReset beep flag]
+    B -->|Yes| D["Show amber badge\n'Silence: Xs'"]
+    D --> E{Audio alert\nenabled?}
+    E -->|No| F[Warning only]
+    E -->|Yes| G{Beep already\nplayed?}
+    G -->|Yes| F
+    G -->|No| H[Play 880Hz beep\nSet beep flag]
+    H --> F
+
+    I[Speech resumes] --> J[lastActivity updated]
+    J --> C
+```
+
 ## Tech Stack
 
 | Component | Choice |
@@ -209,19 +259,21 @@ src/
 ├── lib/
 │   ├── components/
 │   │   ├── SubtitleDisplay.svelte    # Styled subtitle renderer with entry animations
-│   │   ├── ConfigPanel.svelte        # Main config UI (Experts Live branded)
+│   │   ├── ConfigPanel.svelte        # Main config UI, manual text, silence alerts
 │   │   ├── StatusIndicator.svelte    # Activity/health dot overlay
-│   │   ├── SubtitleHistory.svelte    # Scrollable transcript history with timestamps
+│   │   ├── SubtitleHistory.svelte    # Scrollable transcript history with inline editing
 │   │   ├── QrCode.svelte             # QR code canvas for sharing overlay URLs
 │   │   ├── AudioDeviceSelector.svelte
 │   │   ├── StyleControls.svelte      # Font, size, color, outline, position, animation
 │   │   ├── PhraseListEditor.svelte   # IT terminology phrase list
-│   │   └── PresetManager.svelte      # Save/load named configuration presets
+│   │   ├── PresetManager.svelte      # Save/load named configuration presets
+│   │   └── QuickMessages.svelte      # Quick message pills with edit mode
 │   ├── stores/
-│   │   ├── settings.ts               # Azure key, region, languages, device, phrases, profanity
+│   │   ├── settings.ts               # Azure key, region, languages, device, phrases, profanity, alerts
 │   │   ├── subtitles.ts              # Lines buffer, partial text, status, audio level, timer
 │   │   ├── style.ts                  # Font, size, color, outline, position, maxLines, animation
-│   │   └── presets.ts                # Named configuration presets (localStorage-persisted)
+│   │   ├── presets.ts                # Named configuration presets (localStorage-persisted)
+│   │   └── quickMessages.ts          # Quick cue card messages (localStorage-persisted)
 │   ├── services/
 │   │   ├── session.ts                # Session lifecycle (start/stop orchestration)
 │   │   ├── speech.ts                 # Azure Speech SDK wrapper + auto-detect + profanity
@@ -292,6 +344,7 @@ The left sidebar contains all settings:
 - **Language** — source language (English, Dutch, German, French, Spanish, or **Auto-detect**), optional translation target, and profanity filter (Masked/Removed/Raw)
 - **Audio Input** — select microphone or virtual audio device
 - **Subtitle Style** — font, size, color, text outline, position, alignment, max lines, and entry animation (None/Fade/Slide)
+- **Alerts** — silence detection threshold and audio beep toggle
 - **Phrase List** — IT terminology that boosts recognition accuracy (pre-loaded with ~90 Azure/cloud/DevOps terms)
 - **Copy URL** — button in the header copies a shareable URL with current settings (Shift+click to include the Azure key)
 - **Overlay** — open overlay window, copy overlay URL (for OBS), scan QR code to share with crew
@@ -306,6 +359,7 @@ The left sidebar contains all settings:
 | **Clear** | `C` | Clear displayed subtitles |
 | **Export** | | Download session transcript as TXT or SRT |
 | **Fullscreen** | `F` | Enter green-screen output mode |
+| **Send** (manual text) | `T` then `Enter` | Focus manual text input, type message, send as subtitle line |
 | **History** | | Toggle subtitle history panel (replaces preview) |
 | **Open Overlay** | | Open `/overlay` in a new window (receiver mode) |
 | **Copy Overlay URL** | | Copy overlay URL for OBS (Shift+click to include Azure key) |
@@ -374,6 +428,44 @@ The operator panel status bar includes overlay management buttons:
 | **Open Overlay** | Opens `/overlay` in a new browser window (receiver mode) |
 | **Copy Overlay URL** | Copies the overlay URL with `?bg=transparent` for OBS. Shift+click to include the Azure key. |
 
+### Operator Live Controls
+
+During a live event, the operator can intervene in the subtitle stream without stopping recognition:
+
+#### Manual Text Input
+
+A text input bar is always available in the main area, between the status bar and the preview/history panel. Type a message and press **Enter** (or click **Send**) to inject it as a subtitle line. Press `T` from anywhere to focus the input. Works whether or not a recognition session is running — useful for pre-show messages like "Starting soon..." or recovery messages during technical difficulties.
+
+#### Quick Messages
+
+Below the manual text input, a row of pill-shaped buttons provides one-click cue cards. Click a pill to instantly send that message as a subtitle line. Default messages: "Please wait...", "We'll resume shortly", "Q&A session", "Thank you!".
+
+Click **Edit** to enter edit mode where you can:
+- Click a pill to rename it
+- Click **x** to delete a pill
+- Type in the "New..." field and click **+** to add a custom message
+
+Quick messages persist across browser sessions via localStorage.
+
+#### Inline Line Correction
+
+In the History panel, click any line to edit it in place. Press **Enter** or blur the input to save the correction, or **Escape** to cancel. Corrections propagate immediately to:
+- The subtitle display
+- All connected overlay tabs (via BroadcastChannel)
+- The session transcript (so exports reflect the corrected text)
+
+Lines show a dotted underline on hover to indicate they are editable.
+
+#### Silence Detection
+
+When a recognition session is running and no speech activity has been detected for a configurable period (default: 15 seconds), an amber pulsing **"Silence: Xs"** badge appears in the status bar next to the VU meter.
+
+If the **Audio beep on silence** option is enabled, a short 880Hz tone plays once when the threshold is first exceeded. The beep resets when speech resumes and will fire again on the next silence period.
+
+Configure both settings in the **Alerts** section of the sidebar:
+- **Silence threshold** — 5 to 120 seconds (default: 15)
+- **Audio beep on silence** — checkbox toggle (default: off)
+
 ### Subtitle History
 
 Click the **History** button in the status bar to toggle a scrollable transcript view:
@@ -381,6 +473,7 @@ Click the **History** button in the status bar to toggle a scrollable transcript
 - Shows all recognized lines with timestamps relative to session start
 - Auto-scrolls to the latest line; scrolling up pauses auto-scroll
 - **Copy All** button copies the full transcript to clipboard
+- Click any line to edit it inline (see [Inline Line Correction](#inline-line-correction))
 - Displays up to 100 lines (the existing buffer cap)
 
 ### QR Code
@@ -419,7 +512,8 @@ All shortcuts are disabled when focus is in a text input, select, or textarea.
 | `Space` | Toggle Start / Stop recognition |
 | `C` | Clear subtitles |
 | `F` | Toggle fullscreen green screen |
-| `Escape` | Exit fullscreen |
+| `T` | Focus manual text input |
+| `Escape` | Exit fullscreen / blur manual text input |
 
 ### URL Parameters
 

@@ -73,6 +73,16 @@ function createSubtitleStore() {
 			update((state) => ({ ...state, sessionStartTime: time }));
 		},
 
+		updateLine(id: string, newText: string) {
+			if (!newText.trim()) return;
+			update((state) => ({
+				...state,
+				lines: state.lines.map((line) =>
+					line.id === id ? { ...line, text: newText.trim() } : line
+				)
+			}));
+		},
+
 		clear() {
 			update((state) => ({
 				...state,

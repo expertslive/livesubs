@@ -3,7 +3,7 @@
 	import { settings } from '$lib/stores/settings';
 	import { subtitles, type ConnectionStatus } from '$lib/stores/subtitles';
 	import { startSession, stopSession, getSessionTranscriptCount } from '$lib/services/session';
-	import { getEntryCount, exportAsText, exportAsSrt, downloadFile } from '$lib/services/transcript';
+	import { getEntryCount, exportAsText, exportAsSrt, downloadFile, addTranscriptEntry } from '$lib/services/transcript';
 	import { startDemo, stopDemo, isDemoRunning } from '$lib/services/demo';
 	import { buildShareUrl, buildOverlayUrl } from '$lib/utils/url-params';
 	import AudioDeviceSelector from './AudioDeviceSelector.svelte';
@@ -13,6 +13,7 @@
 	import SubtitleDisplay from './SubtitleDisplay.svelte';
 	import SubtitleHistory from './SubtitleHistory.svelte';
 	import QrCode from './QrCode.svelte';
+	import QuickMessages from './QuickMessages.svelte';
 
 	interface Props {
 		onFullscreen: () => void;
@@ -63,6 +64,74 @@
 		{ value: 'fr', label: 'French' },
 		{ value: 'es', label: 'Spanish' }
 	];
+
+	// Manual text input
+	let manualText = $state('');
+	let manualTextInput: HTMLInputElement | undefined = $state();
+
+	function handleManualSend() {
+		if (!manualText.trim()) return;
+		subtitles.addFinalLine(manualText);
+		addTranscriptEntry(manualText);
+		manualText = '';
+	}
+
+	function handleManualKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			handleManualSend();
+		}
+		if (e.key === 'Escape') {
+			manualTextInput?.blur();
+		}
+	}
+
+	function handleFocusManualInput() {
+		manualTextInput?.focus();
+	}
+
+	// Silence detection
+	let silenceBeepPlayed = $state(false);
+	let silenceAudioCtx: AudioContext | null = null;
+
+	let silenceSeconds = $derived.by(() => {
+		const lastActivity = $subtitles.lastActivityTimestamp;
+		if (!lastActivity || !running) return 0;
+		return Math.max(0, Math.floor((now - lastActivity) / 1000));
+	});
+
+	let silenceWarning = $derived(
+		running && silenceSeconds >= $settings.silenceThresholdSeconds
+	);
+
+	$effect(() => {
+		if (silenceWarning && $settings.silenceAudioAlert && !silenceBeepPlayed) {
+			playBeep();
+			silenceBeepPlayed = true;
+		}
+		if (!silenceWarning) {
+			silenceBeepPlayed = false;
+		}
+	});
+
+	function playBeep() {
+		try {
+			const ctx = silenceAudioCtx || new AudioContext();
+			silenceAudioCtx = ctx;
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.type = 'sine';
+			osc.frequency.value = 880;
+			gain.gain.setValueAtTime(0.3, ctx.currentTime);
+			gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.start(ctx.currentTime);
+			osc.stop(ctx.currentTime + 0.3);
+		} catch {
+			// Audio not available
+		}
+	}
 
 	let showExportMenu = $state(false);
 	let transcriptCount = $state(0);
@@ -147,10 +216,12 @@
 
 	onMount(() => {
 		timerInterval = setInterval(() => { now = Date.now(); }, 1000);
+		window.addEventListener('livesubs:focus-manual-input', handleFocusManualInput);
 	});
 
 	onDestroy(() => {
 		if (timerInterval) clearInterval(timerInterval);
+		window.removeEventListener('livesubs:focus-manual-input', handleFocusManualInput);
 	});
 
 	let sessionElapsed = $derived.by(() => {
@@ -319,6 +390,31 @@
 			<!-- Style Controls -->
 			<StyleControls disabled={running} />
 
+			<!-- Alerts -->
+			<div class="space-y-2">
+				<h3 class="text-sm font-semibold text-white">Alerts</h3>
+				<div>
+					<label class="block text-xs mb-1" style:color="var(--el-muted)">Silence threshold (seconds)
+					<input
+						type="number"
+						min="5"
+						max="120"
+						bind:value={$settings.silenceThresholdSeconds}
+						class="w-full rounded px-3 py-1.5 text-sm text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)]"
+						style:background-color="var(--el-bg-light)"
+					/>
+					</label>
+				</div>
+				<label class="flex items-center gap-2 text-xs cursor-pointer" style:color="var(--el-muted)">
+					<input
+						type="checkbox"
+						bind:checked={$settings.silenceAudioAlert}
+						class="accent-[var(--el-accent)]"
+					/>
+					Audio beep on silence
+				</label>
+			</div>
+
 			<!-- Phrase List -->
 			<PhraseListEditor disabled={running} />
 		</div>
@@ -441,6 +537,11 @@
 						></div>
 					</div>
 				</div>
+				{#if silenceWarning}
+					<span class="text-xs font-semibold px-2 py-0.5 rounded-full animate-pulse" style="background-color: rgba(245, 158, 11, 0.2); color: #F59E0B;">
+						Silence: {silenceSeconds}s
+					</span>
+				{/if}
 			{/if}
 
 			<div class="ml-auto flex items-center gap-2">
@@ -472,6 +573,30 @@
 					{overlayUrlCopied ? 'Copied!' : 'Copy Overlay URL'}
 				</button>
 			</div>
+		</div>
+
+		<!-- Manual text input + Quick messages -->
+		<div class="px-4 py-2 space-y-2 border-b border-white/10" style:background-color="var(--el-bg)">
+			<div class="flex gap-2">
+				<input
+					bind:this={manualTextInput}
+					bind:value={manualText}
+					onkeydown={handleManualKeydown}
+					type="text"
+					placeholder="Type a manual message..."
+					class="flex-1 rounded px-3 py-1.5 text-sm text-white border border-white/10 placeholder:text-[var(--el-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--el-accent)]"
+					style:background-color="var(--el-bg-light)"
+				/>
+				<button
+					onclick={handleManualSend}
+					disabled={!manualText.trim()}
+					class="rounded px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-all disabled:opacity-50"
+					style:background-color="var(--el-accent)"
+				>
+					Send
+				</button>
+			</div>
+			<QuickMessages />
 		</div>
 
 		<!-- History / Preview area -->

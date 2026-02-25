@@ -16,6 +16,15 @@ export function addTranscriptEntry(text: string) {
 	entries.push({ text: text.trim(), timestamp: Date.now() });
 }
 
+export function updateTranscriptEntry(oldText: string, newText: string) {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		if (entries[i].text === oldText) {
+			entries[i] = { ...entries[i], text: newText.trim() };
+			return;
+		}
+	}
+}
+
 export function getEntryCount(): number {
 	return entries.length;
 }

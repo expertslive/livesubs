@@ -11,6 +11,8 @@ export interface Settings {
 	phrases: string[];
 	profanityFilter: ProfanityFilter;
 	autoDetectLanguages: string[];
+	silenceThresholdSeconds: number;
+	silenceAudioAlert: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -21,7 +23,9 @@ const defaultSettings: Settings = {
 	audioDeviceId: '',
 	phrases: [],
 	profanityFilter: 'masked',
-	autoDetectLanguages: ['en-US', 'nl-NL', 'de-DE']
+	autoDetectLanguages: ['en-US', 'nl-NL', 'de-DE'],
+	silenceThresholdSeconds: 15,
+	silenceAudioAlert: false
 };
 
 function createSettingsStore() {
