@@ -17,9 +17,15 @@ export async function getAudioInputDevices(): Promise<AudioDevice[]> {
 export interface AudioLevelMonitor {
 	getLevel: () => number;
 	stop: () => void;
+	resume: () => void;
 }
 
-export async function createAudioLevelMonitor(deviceId?: string): Promise<AudioLevelMonitor> {
+let activeMonitor: AudioLevelMonitor | null = null;
+
+export async function createAudioLevelMonitor(
+	deviceId?: string,
+	onTrackEnded?: () => void
+): Promise<AudioLevelMonitor> {
 	const constraints: MediaStreamConstraints = {
 		audio: deviceId ? { deviceId: { exact: deviceId } } : true
 	};
@@ -34,7 +40,14 @@ export async function createAudioLevelMonitor(deviceId?: string): Promise<AudioL
 
 	const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-	return {
+	// Watch for track ended (device unplugged)
+	if (onTrackEnded) {
+		for (const track of stream.getTracks()) {
+			track.addEventListener('ended', onTrackEnded);
+		}
+	}
+
+	const monitor: AudioLevelMonitor = {
 		getLevel(): number {
 			analyser.getByteFrequencyData(dataArray);
 			let sum = 0;
@@ -49,6 +62,39 @@ export async function createAudioLevelMonitor(deviceId?: string): Promise<AudioL
 			for (const track of stream.getTracks()) {
 				track.stop();
 			}
+			if (activeMonitor === monitor) {
+				activeMonitor = null;
+			}
+		},
+		resume() {
+			if (audioContext.state === 'suspended') {
+				audioContext.resume();
+			}
 		}
+	};
+
+	activeMonitor = monitor;
+	return monitor;
+}
+
+export function resumeActiveMonitor() {
+	if (activeMonitor) {
+		activeMonitor.resume();
+	}
+}
+
+export function watchDeviceChanges(callback: () => void): () => void {
+	let timeout: ReturnType<typeof setTimeout> | null = null;
+
+	const handler = () => {
+		if (timeout) clearTimeout(timeout);
+		timeout = setTimeout(callback, 500);
+	};
+
+	navigator.mediaDevices.addEventListener('devicechange', handler);
+
+	return () => {
+		navigator.mediaDevices.removeEventListener('devicechange', handler);
+		if (timeout) clearTimeout(timeout);
 	};
 }

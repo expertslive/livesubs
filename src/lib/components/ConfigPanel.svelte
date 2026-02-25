@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { settings } from '$lib/stores/settings';
 	import { subtitles, type ConnectionStatus } from '$lib/stores/subtitles';
-	import { startRecognition, stopRecognition, isRecognizing } from '$lib/services/speech';
-	import { createAudioLevelMonitor, type AudioLevelMonitor } from '$lib/services/audio';
+	import { startRecognition, stopRecognition } from '$lib/services/speech';
+	import { createAudioLevelMonitor, type AudioLevelMonitor, getAudioInputDevices, watchDeviceChanges } from '$lib/services/audio';
+	import { enableAutoReconnect, disableAutoReconnect } from '$lib/services/reconnection';
+	import { requestWakeLock, releaseWakeLock } from '$lib/services/wakelock';
+	import { startSession, getEntryCount, exportAsText, exportAsSrt, downloadFile } from '$lib/services/transcript';
+	import { startDemo, stopDemo, isDemoRunning } from '$lib/services/demo';
 	import AudioDeviceSelector from './AudioDeviceSelector.svelte';
 	import StyleControls from './StyleControls.svelte';
 	import PhraseListEditor from './PhraseListEditor.svelte';
@@ -14,9 +18,12 @@
 
 	let { onFullscreen }: Props = $props();
 
-	let running = $state(false);
+	let running = $derived(
+		['connecting', 'connected', 'reconnecting'].includes($subtitles.connectionStatus)
+	);
 	let audioMonitor = $state<AudioLevelMonitor | null>(null);
 	let audioLevelInterval: ReturnType<typeof setInterval> | null = null;
+	let unwatchDevices: (() => void) | null = null;
 
 	const sourceLanguages = [
 		{ value: 'en-US', label: 'English (US)' },
@@ -36,11 +43,63 @@
 		{ value: 'es', label: 'Spanish' }
 	];
 
+	function handleDeviceDisconnect() {
+		subtitles.setStatus('error', 'Audio device disconnected. Please reconnect and restart.');
+		handleStop();
+	}
+
+	async function handleDeviceChange() {
+		if (!running) return;
+		const deviceId = $settings.audioDeviceId;
+		if (!deviceId) return; // using default device
+		const devices = await getAudioInputDevices();
+		const stillPresent = devices.some((d) => d.deviceId === deviceId);
+		if (!stillPresent) {
+			handleDeviceDisconnect();
+		}
+	}
+
+	let showExportMenu = $state(false);
+	let transcriptCount = $state(0);
+	let demoRunning = $state(false);
+
+	function updateTranscriptCount() {
+		transcriptCount = getEntryCount();
+	}
+
+	function handleExportTxt() {
+		const content = exportAsText();
+		const date = new Date().toISOString().slice(0, 10);
+		downloadFile(content, `livesubs-${date}.txt`);
+		showExportMenu = false;
+	}
+
+	function handleExportSrt() {
+		const content = exportAsSrt();
+		const date = new Date().toISOString().slice(0, 10);
+		downloadFile(content, `livesubs-${date}.srt`);
+		showExportMenu = false;
+	}
+
+	function handleDemo() {
+		if (demoRunning) {
+			stopDemo();
+			demoRunning = false;
+		} else {
+			startDemo();
+			demoRunning = true;
+		}
+	}
+
 	async function handleStart() {
-		running = true;
+		startSession();
+		enableAutoReconnect();
 		try {
-			// Start audio level monitor
-			audioMonitor = await createAudioLevelMonitor($settings.audioDeviceId || undefined);
+			// Start audio level monitor with track-ended detection
+			audioMonitor = await createAudioLevelMonitor(
+				$settings.audioDeviceId || undefined,
+				handleDeviceDisconnect
+			);
 			audioLevelInterval = setInterval(() => {
 				if (audioMonitor) {
 					subtitles.setAudioLevel(audioMonitor.getLevel());
@@ -49,11 +108,25 @@
 		} catch {
 			// Audio monitor is optional
 		}
+		// Watch for device list changes (USB unplug)
+		unwatchDevices = watchDeviceChanges(handleDeviceChange);
+		await requestWakeLock();
 		await startRecognition();
 	}
 
 	async function handleStop() {
+		if (demoRunning) {
+			stopDemo();
+			demoRunning = false;
+			return;
+		}
+		disableAutoReconnect();
+		releaseWakeLock();
 		await stopRecognition();
+		if (unwatchDevices) {
+			unwatchDevices();
+			unwatchDevices = null;
+		}
 		if (audioLevelInterval) {
 			clearInterval(audioLevelInterval);
 			audioLevelInterval = null;
@@ -63,7 +136,7 @@
 			audioMonitor = null;
 		}
 		subtitles.setAudioLevel(0);
-		running = false;
+		updateTranscriptCount();
 	}
 
 	function handleClear() {
@@ -75,6 +148,7 @@
 		switch (status) {
 			case 'connected': return 'var(--el-accent)';
 			case 'connecting': return '#F59E0B';
+			case 'reconnecting': return '#F59E0B';
 			case 'error': return '#DC2626';
 			default: return 'var(--el-muted)';
 		}
@@ -85,6 +159,7 @@
 		switch (status) {
 			case 'connected': return 'Connected';
 			case 'connecting': return 'Connecting...';
+			case 'reconnecting': return $subtitles.errorMessage || 'Reconnecting...';
 			case 'error': return 'Error';
 			default: return 'Disconnected';
 		}
@@ -185,7 +260,7 @@
 		<!-- Controls -->
 		<div class="p-4 border-t border-white/10 space-y-3">
 			<div class="flex gap-2">
-				{#if !running}
+				{#if !running && !demoRunning}
 					<button
 						onclick={handleStart}
 						class="flex-1 rounded py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
@@ -203,6 +278,18 @@
 					</button>
 				{/if}
 				<button
+					onclick={handleDemo}
+					disabled={running}
+					class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all disabled:opacity-50"
+					style:background-color="var(--el-bg-light)"
+					style:color="var(--el-muted)"
+					title="Demo mode with sample text"
+				>
+					{demoRunning ? 'Stop Demo' : 'Demo'}
+				</button>
+			</div>
+			<div class="flex gap-2">
+				<button
 					onclick={handleClear}
 					class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
 					style:background-color="var(--el-bg-light)"
@@ -211,9 +298,39 @@
 				>
 					Clear
 				</button>
+				<div class="relative">
+					<button
+						onclick={() => { updateTranscriptCount(); showExportMenu = !showExportMenu; }}
+						class="rounded px-3 py-2.5 text-sm font-medium hover:brightness-110 transition-all"
+						style:background-color="var(--el-bg-light)"
+						style:color="var(--el-muted)"
+						title="Export transcript"
+					>
+						Export{transcriptCount > 0 ? ` (${transcriptCount})` : ''}
+					</button>
+					{#if showExportMenu}
+						<div
+							class="absolute bottom-full left-0 mb-1 rounded border border-white/10 py-1 min-w-[120px]"
+							style:background-color="var(--el-navy)"
+						>
+							<button
+								onclick={handleExportTxt}
+								class="block w-full text-left px-3 py-1.5 text-sm text-white hover:bg-white/10"
+							>
+								Export as TXT
+							</button>
+							<button
+								onclick={handleExportSrt}
+								class="block w-full text-left px-3 py-1.5 text-sm text-white hover:bg-white/10"
+							>
+								Export as SRT
+							</button>
+						</div>
+					{/if}
+				</div>
 				<button
 					onclick={onFullscreen}
-					class="rounded px-3 py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
+					class="ml-auto rounded px-3 py-2.5 text-sm font-bold text-white hover:brightness-110 transition-all"
 					style:background-color="var(--el-blue)"
 					title="Fullscreen (F)"
 				>

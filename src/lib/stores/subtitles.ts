@@ -7,7 +7,7 @@ export interface SubtitleLine {
 	timestamp: number;
 }
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 export interface SubtitleState {
 	lines: SubtitleLine[];
@@ -15,6 +15,7 @@ export interface SubtitleState {
 	connectionStatus: ConnectionStatus;
 	errorMessage: string;
 	audioLevel: number;
+	lastActivityTimestamp: number;
 }
 
 const defaultState: SubtitleState = {
@@ -22,7 +23,8 @@ const defaultState: SubtitleState = {
 	partialText: '',
 	connectionStatus: 'disconnected',
 	errorMessage: '',
-	audioLevel: 0
+	audioLevel: 0,
+	lastActivityTimestamp: 0
 };
 
 function createSubtitleStore() {
@@ -49,12 +51,12 @@ function createSubtitleStore() {
 				if (lines.length > 100) {
 					lines.splice(0, lines.length - 100);
 				}
-				return { ...state, lines, partialText: '' };
+				return { ...state, lines, partialText: '', lastActivityTimestamp: Date.now() };
 			});
 		},
 
 		setPartial(text: string) {
-			update((state) => ({ ...state, partialText: text }));
+			update((state) => ({ ...state, partialText: text, lastActivityTimestamp: Date.now() }));
 		},
 
 		setStatus(status: ConnectionStatus, errorMessage = '') {

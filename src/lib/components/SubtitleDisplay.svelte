@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { subtitles } from '$lib/stores/subtitles';
 	import { style } from '$lib/stores/style';
+	import StatusIndicator from './StatusIndicator.svelte';
 
 	interface Props {
 		preview?: boolean;
@@ -10,8 +11,10 @@
 
 	let visibleLines = $derived.by(() => {
 		const maxLines = $style.maxLines;
-		const lines = $subtitles.lines.slice(-maxLines);
-		return lines;
+		// Reserve one line slot for partial text when it exists
+		const reserveForPartial = $subtitles.partialText ? 1 : 0;
+		const finalLineCount = Math.max(maxLines - reserveForPartial, 0);
+		return $subtitles.lines.slice(-finalLineCount);
 	});
 
 	let scaleFactor = $derived(preview ? 0.3 : 1);
@@ -47,6 +50,7 @@
 	style:justify-content={justifyContent}
 	style:padding="{preview ? 8 : 32}px"
 >
+	<StatusIndicator />
 	{#each visibleLines as line (line.id)}
 		<div class="subtitle-line">{line.text}</div>
 	{/each}
@@ -59,6 +63,7 @@
 
 <style>
 	.subtitle-container {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		width: 100%;

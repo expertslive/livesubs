@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { settings } from '$lib/stores/settings';
 	import { defaultPhrases } from '$lib/utils/phrases';
+	import { resumeActiveMonitor } from '$lib/services/audio';
 	import ConfigPanel from '$lib/components/ConfigPanel.svelte';
 	import SubtitleDisplay from '$lib/components/SubtitleDisplay.svelte';
 
@@ -40,6 +41,12 @@
 		isFullscreen = !!document.fullscreenElement;
 	}
 
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			resumeActiveMonitor();
+		}
+	}
+
 	onMount(() => {
 		// Load default phrases on first visit
 		if ($settings.phrases.length === 0) {
@@ -47,8 +54,10 @@
 		}
 
 		document.addEventListener('fullscreenchange', handleFullscreenChange);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
 			document.removeEventListener('fullscreenchange', handleFullscreenChange);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 		};
 	});
 </script>

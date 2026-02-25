@@ -2,6 +2,8 @@ import * as SpeechSDK from 'microsoft-cognitiveservices-speech-sdk';
 import { get } from 'svelte/store';
 import { settings } from '$lib/stores/settings';
 import { subtitles } from '$lib/stores/subtitles';
+import { attemptReconnect, resetBackoff, isAutoReconnectEnabled } from '$lib/services/reconnection';
+import { addTranscriptEntry } from '$lib/services/transcript';
 
 let recognizer: SpeechSDK.SpeechRecognizer | SpeechSDK.TranslationRecognizer | null = null;
 
@@ -65,15 +67,18 @@ function wireEvents(rec: SpeechSDK.SpeechRecognizer | SpeechSDK.TranslationRecog
 				text = event.result.text;
 			}
 			subtitles.addFinalLine(text);
+			addTranscriptEntry(text);
 		}
 	};
 
 	rec.canceled = (_sender, event) => {
 		if (event.reason === SpeechSDK.CancellationReason.Error) {
 			let message = 'Recognition error';
+			let transient = false;
 			switch (event.errorCode) {
 				case SpeechSDK.CancellationErrorCode.ConnectionFailure:
 					message = 'Connection failed. Check your internet connection and Azure region.';
+					transient = true;
 					break;
 				case SpeechSDK.CancellationErrorCode.AuthenticationFailure:
 					message = 'Authentication failed. Check your Azure Speech key.';
@@ -86,20 +91,31 @@ function wireEvents(rec: SpeechSDK.SpeechRecognizer | SpeechSDK.TranslationRecog
 					break;
 				case SpeechSDK.CancellationErrorCode.ServiceUnavailable:
 					message = 'Azure Speech service is temporarily unavailable.';
+					transient = true;
 					break;
 				default:
 					message = event.errorDetails || 'Unknown recognition error';
+					transient = true;
 			}
-			subtitles.setStatus('error', message);
+			if (transient && isAutoReconnectEnabled()) {
+				attemptReconnect();
+			} else {
+				subtitles.setStatus('error', message);
+			}
 		}
 	};
 
 	rec.sessionStarted = () => {
+		resetBackoff();
 		subtitles.setStatus('connected');
 	};
 
 	rec.sessionStopped = () => {
-		subtitles.setStatus('disconnected');
+		if (isAutoReconnectEnabled()) {
+			attemptReconnect();
+		} else {
+			subtitles.setStatus('disconnected');
+		}
 	};
 }
 

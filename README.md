@@ -2,6 +2,8 @@
 
 Real-time subtitling app for **Experts Live** IT conferences. Captures audio from a microphone or virtual audio device, transcribes speech using Azure Cognitive Services, optionally translates between English and Dutch, and displays configurable subtitles on a chroma-key green screen.
 
+Built for multi-hour live events with automatic reconnection, device disconnect detection, screen wake lock, and session transcript export.
+
 ![Experts Live](static/logo.png)
 
 ## Architecture
@@ -52,16 +54,62 @@ flowchart LR
     subgraph Services
         SP[speech.ts]
         AU[audio.ts]
+        RC[reconnection.ts]
+        TR[transcript.ts]
+        WL[wakelock.ts]
+        DM[demo.ts]
     end
 
     S1 -->|Azure key, language,\nphrases, device| SP
     SP -->|partial text,\nfinal lines, status| S3
+    SP -->|final lines| TR
     AU -->|audio level| S3
+    RC -->|reconnect on failure| SP
     S2 --> SD[SubtitleDisplay]
     S3 --> SD
+    DM -->|simulated text| S3
 
     S1 -.->|persisted| LS[(localStorage)]
     S2 -.->|persisted| LS
+    TR -.->|export| DL[TXT / SRT download]
+```
+
+### Reconnection Flow
+
+When Azure disconnects mid-session, the app automatically recovers:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Disconnected
+    Disconnected --> Connecting: Start
+    Connecting --> Connected: sessionStarted
+    Connecting --> Error: auth / bad request
+    Connected --> Reconnecting: transient error / session lost
+    Reconnecting --> Connecting: backoff timer fires
+    Reconnecting --> Error: max retries (10) exceeded
+    Connected --> Disconnected: Stop
+    Error --> Disconnected: Stop
+    Reconnecting --> Disconnected: Stop
+
+    note right of Reconnecting
+        Exponential backoff
+        1s → 2s → 4s → 8s → 16s → 30s cap
+    end note
+```
+
+### Device Disconnect Handling
+
+```mermaid
+flowchart TD
+    A[USB mic unplugged] --> B{Detection method}
+    B -->|MediaStreamTrack ended| C[Track ended event]
+    B -->|Device list changed| D[devicechange event\n500ms debounce]
+    D --> E{Selected device\nstill present?}
+    E -->|No| F[Set error status]
+    E -->|Yes| G[No action]
+    C --> F
+    F --> H[Stop recognition]
+    H --> I[Operator reconnects\ndevice and restarts]
 ```
 
 ## Tech Stack
@@ -84,6 +132,7 @@ src/
 │   ├── components/
 │   │   ├── SubtitleDisplay.svelte    # Styled subtitle renderer (preview + fullscreen)
 │   │   ├── ConfigPanel.svelte        # Main config UI (Experts Live branded)
+│   │   ├── StatusIndicator.svelte    # Activity/health dot overlay
 │   │   ├── AudioDeviceSelector.svelte
 │   │   ├── StyleControls.svelte      # Font, size, color, outline, position
 │   │   └── PhraseListEditor.svelte   # IT terminology phrase list
@@ -93,7 +142,11 @@ src/
 │   │   └── style.ts                  # Font, size, color, outline, position, maxLines
 │   ├── services/
 │   │   ├── speech.ts                 # Azure Speech SDK wrapper
-│   │   └── audio.ts                  # Device enumeration + VU meter
+│   │   ├── audio.ts                  # Device enumeration, VU meter, disconnect detection
+│   │   ├── reconnection.ts           # Auto-reconnect with exponential backoff
+│   │   ├── transcript.ts             # Session recording + TXT/SRT export
+│   │   ├── wakelock.ts               # Screen Wake Lock API wrapper
+│   │   └── demo.ts                   # Demo mode with canned conference text
 │   └── utils/
 │       └── phrases.ts                # ~90 default IT/cloud/Azure terms
 ├── routes/
@@ -126,6 +179,10 @@ Open the app in your browser, then:
 4. Press **Start** — speak into the mic and see subtitles appear
 5. Press **F** or the **Fullscreen** button for green-screen output
 
+### Demo Mode
+
+To test the app without Azure credentials, click the **Demo** button. This feeds canned conference text through the subtitle display at realistic typing speeds, simulating partial-to-final transitions. Demo mode does not require an Azure key or microphone.
+
 ### Build for Production
 
 ```sh
@@ -146,6 +203,17 @@ The left sidebar contains all settings:
 - **Subtitle Style** — font, size, color, text outline, position, alignment, max lines
 - **Phrase List** — IT terminology that boosts recognition accuracy (pre-loaded with ~90 Azure/cloud/DevOps terms)
 
+### Controls
+
+| Button | Action |
+|--------|--------|
+| **Start** | Begin recognition session (connects to Azure, acquires wake lock, starts transcript) |
+| **Stop** | End session (disconnects, releases resources) |
+| **Demo** | Run demo mode with sample text (no Azure key needed) |
+| **Clear** | Clear displayed subtitles |
+| **Export** | Download session transcript as TXT or SRT |
+| **Fullscreen** | Enter green-screen output mode |
+
 ### Fullscreen Green Screen
 
 Press **F** or click **Fullscreen** to enter chroma-key mode:
@@ -155,12 +223,43 @@ Press **F** or click **Fullscreen** to enter chroma-key mode:
 - Designed for OBS/vMix chroma key into a video feed
 - Press **Escape** to return to config
 
+### Status Indicator
+
+A small dot overlay appears in the top-right corner of the subtitle display:
+
+| Color | Meaning |
+|-------|---------|
+| Green (pulsing) | Connected, speech activity within last 5 seconds |
+| Amber (steady) | Connected, but no speech detected for 5+ seconds |
+| Red (blinking) | Error or reconnecting |
+| Hidden | Disconnected |
+
+### Transcript Export
+
+Every recognized line is recorded with a timestamp during the session. Click **Export** to download:
+
+- **TXT** — timestamped plain text (`[HH:MM:SS] text`)
+- **SRT** — standard subtitle format (compatible with video editors)
+
+The entry count is shown on the Export button.
+
 ### Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
 | `F` | Toggle fullscreen green screen |
 | `Escape` | Exit fullscreen |
+
+## Production Hardening
+
+Features designed for reliability during multi-hour live conferences:
+
+- **Auto-reconnection** — transient network errors trigger exponential backoff reconnection (1s to 30s, max 10 attempts). Authentication and permission errors are not retried.
+- **Device disconnect detection** — unplugging a USB mic is detected via `MediaStreamTrack.ended` events and `devicechange` listeners. Recognition is stopped with a clear error message.
+- **Screen Wake Lock** — prevents the OS from sleeping the display during a session. Automatically re-acquires the lock when the tab regains visibility.
+- **Tab visibility handling** — when the browser tab is backgrounded and restored, the audio context is automatically resumed to prevent VU meter stalls.
+- **Partial text overflow fix** — when partial (in-progress) text is present, one line slot is reserved for it so the display never exceeds the configured `maxLines`.
+- **Derived connection state** — the Start/Stop button state is derived directly from the subtitle store's `connectionStatus`, eliminating UI desync if recognition fails to start.
 
 ## Deployment
 
